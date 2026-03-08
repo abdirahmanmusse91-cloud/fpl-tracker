@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import httpx
 import os
@@ -62,6 +61,5 @@ async def chat(body: dict):
 
 @app.get("/")
 async def root():
-    return FileResponse("static/index.html")
+    return FileResponse("index.html")
 
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
