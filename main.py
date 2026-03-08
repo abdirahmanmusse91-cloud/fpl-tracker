@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import httpx
 import os
-import anthropic
 
 app = FastAPI()
 
@@ -46,20 +45,28 @@ async def get_history(entry_id: int):
 
 @app.post("/api/chat")
 async def chat(body: dict):
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY saknas")
-    
-    client = anthropic.Anthropic(api_key=api_key)
-    msg = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        system=body.get("system", "Du är en FPL-expert. Svara på svenska."),
-        messages=[{"role": "user", "content": body.get("message", "")}]
-    )
-    return {"reply": msg.content[0].text}
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY saknas")
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "llama3-8b-8192",
+                "messages": [
+                    {"role": "system", "content": body.get("system", "Du är en FPL-expert. Svara på svenska.")},
+                    {"role": "user", "content": body.get("message", "")}
+                ],
+                "max_tokens": 500
+            }
+        )
+        if r.status_code != 200:
+            raise HTTPException(status_code=r.status_code, detail=f"Groq API error: {r.text}")
+        data = r.json()
+        return {"reply": data["choices"][0]["message"]["content"]}
 
 @app.get("/")
 async def root():
     return FileResponse("index.html")
-

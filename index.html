@@ -322,47 +322,17 @@ function renderCumChart() {
   });
 }
 
-function answerQuestion(msg) {
-  if(!dataLoaded) return 'Data är inte laddad än, försök igen om ett ögonblick.';
-  const q = msg.toLowerCase();
-  const gwMatch = q.match(/gw\s*(\d+)|omg[åa]ng\s*(\d+)/);
-  const gwNum = gwMatch ? parseInt(gwMatch[1]||gwMatch[2]) : null;
-
-  if(q.includes('topp 3')||q.includes('top 3')||q.includes('ledare')||q.includes('ställning')||q.includes('sammanlagt')) {
-    return '🏆 **Topp 3 sammanlagt:**\n' + managers.slice(0,3).map((m,i)=>`${['🥇','🥈','🥉'][i]} ${m.player_name}: **${m.total} pts**`).join('\n');
-  }
-  if(gwNum && (q.includes('högst')||q.includes('bäst')||q.includes('flest')||q.includes('vann')||q.includes('vem'))) {
-    const s=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[gwNum]||0})).sort((a,b)=>b.pts-a.pts);
-    return `🏅 **Högst poäng GW${gwNum}:**\n`+s.slice(0,3).map((x,i)=>`${i+1}. ${x.name}: **${x.pts} pts**`).join('\n');
-  }
-  if(q.includes('senaste')||q.includes('förra')||(q.includes('högst')&&!gwNum)||(q.includes('bäst')&&!gwNum)) {
-    const s=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[currentGW]||0})).sort((a,b)=>b.pts-a.pts);
-    return `⚡ **GW${currentGW} — Bäst:**\n`+s.slice(0,3).map((x,i)=>`${i+1}. ${x.name}: **${x.pts} pts**`).join('\n');
-  }
-  if(q.includes('skillnad')||q.includes('gap')||q.includes('sista')||q.includes('sist')) {
-    const f=managers[0], l=managers[managers.length-1];
-    return `📊 **Poängskillnad:**\n1:a: ${f.player_name} (${f.total} pts)\nSista: ${l.player_name} (${l.total} pts)\nSkillnad: **${f.total-l.total} pts**`;
-  }
-  if(q.includes('förbättr')||q.includes('form')||q.includes('3 gw')||q.includes('tre')) {
-    const last3=Array.from({length:3},(_,i)=>currentGW-i).filter(g=>g>0);
-    const s=managers.map(m=>({name:m.player_name,pts:last3.reduce((sum,gw)=>sum+(gwHistory[m.entry]?.[gw]||0),0)})).sort((a,b)=>b.pts-a.pts);
-    return `📈 **Bäst senaste 3 GW:**\n`+s.slice(0,3).map((x,i)=>`${i+1}. ${x.name}: **${x.pts} pts**`).join('\n');
-  }
-  if(gwNum) {
-    const s=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[gwNum]||0})).sort((a,b)=>b.pts-a.pts);
-    return `📋 **Alla poäng GW${gwNum}:**\n`+s.map((x,i)=>`${i+1}. ${x.name}: **${x.pts} pts**`).join('\n');
-  }
-  if(q.includes('alla')||q.includes('total')||q.includes('totalt')) {
-    return '📋 **Totalpoäng:**\n'+managers.map((m,i)=>`${i+1}. ${m.player_name}: **${m.total} pts**`).join('\n');
-  }
-  if(q.includes('lägst')||q.includes('sämst')||q.includes('minst')) {
-    const s=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[currentGW]||0})).sort((a,b)=>a.pts-b.pts);
-    return `📉 **Lägst GW${currentGW}:** ${s[0].name}: **${s[0].pts} pts**`;
-  }
-  return `Prova t.ex:\n• "Vem hade högst poäng GW15?"\n• "Visa topp 3"\n• "Bäst senaste 3 GW"\n• "Skillnad mellan 1:a och sista"`;
+function buildContext() {
+  if(!dataLoaded) return 'Data ej laddad.';
+  const gws=Array.from({length:currentGW},(_,i)=>i+1);
+  let ctx=`FPL-liga ID ${LEAGUE_ID}, aktuell omgång: GW${currentGW}.\n\nLIGATABELL (totalpoäng):\n`;
+  managers.forEach((m,i)=>{ ctx+=`${i+1}. ${m.player_name} (${m.entry_name}): ${m.total} pts\n`; });
+  ctx+=`\nPOÄNG PER OMGÅNG (netto efter avdrag):\n`;
+  managers.forEach(m=>{ ctx+=`${m.player_name}: `+gws.map(gw=>`GW${gw}=${gwHistory[m.entry]?.[gw]||0}`).join(', ')+'\n'; });
+  return ctx;
 }
 
-function sendMessage(text) {
+async function sendMessage(text) {
   const input=document.getElementById('chat-input');
   const msg=text||input.value.trim();
   if(!msg) return;
@@ -370,7 +340,18 @@ function sendMessage(text) {
   appendMsg(msg,'user');
   document.getElementById('suggestions').style.display='none';
   const typing=appendTyping();
-  setTimeout(()=>{ typing.remove(); appendMsg(answerQuestion(msg),'ai'); }, 400);
+  document.getElementById('send-btn').disabled=true;
+  try {
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        system:`Du är en FPL-expert och analyserar en privat mini-liga. Svara alltid på svenska, var kortfattad och använd gärna emojis. Här är all ligadata:\n\n${buildContext()}`,
+        message:msg
+      })});
+    typing.remove();
+    const data=await res.json();
+    appendMsg(data.reply||'Inget svar.','ai');
+  } catch(e) { typing.remove(); appendMsg('Fel vid anrop till servern.','ai'); }
+  document.getElementById('send-btn').disabled=false;
 }
 
 function appendMsg(text,role) {
