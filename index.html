@@ -29,7 +29,20 @@ header {
 .gw-pill { background:rgba(0,255,135,0.08); border:1px solid rgba(0,255,135,0.2); color:var(--g); font-family:'Bebas Neue',sans-serif; font-size:0.8rem; letter-spacing:2px; padding:4px 12px; border-radius:20px; }
 
 .app { display:grid; grid-template-columns:1fr 340px; min-height:calc(100vh - 60px); }
-@media(max-width:800px){ .app { grid-template-columns:1fr; } .sidebar { height:480px; position:relative; top:0; border-top:1px solid var(--border); } }
+@media(max-width:800px){
+  .app { grid-template-columns:1fr; }
+  .sidebar {
+    position:fixed; bottom:0; right:0; left:0; top:0;
+    z-index:200; transform:translateY(100%);
+    transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);
+    height:100vh; border-top:none;
+  }
+  .sidebar.open { transform:translateY(0); }
+  .chat-fab {
+    display:flex !important;
+  }
+  .chat-close-btn { display:flex !important; }
+}
 
 .main { padding:24px 20px; overflow-y:auto; border-right:1px solid var(--border); }
 
@@ -90,6 +103,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .bar-fill { height:100%; background:linear-gradient(90deg,var(--g),var(--g2)); border-radius:2px; transition:width 0.5s cubic-bezier(0.4,0,0.2,1); }
 .bar-fill.top { background:linear-gradient(90deg,var(--gold),#ffaa00); }
 .bar-pts { font-family:'Bebas Neue',sans-serif; font-size:0.9rem; letter-spacing:1px; width:32px; text-align:right; flex-shrink:0; }
+.bar-total { font-size:0.62rem; color:var(--muted); text-align:right; flex-shrink:0; width:60px; }
 .gw-nav { display:flex; flex-wrap:wrap; gap:5px; padding:12px 16px; border-top:1px solid var(--border); background:rgba(0,0,0,0.2); }
 .gwb { background:var(--border); border:1px solid transparent; color:var(--muted); font-size:0.65rem; letter-spacing:1px; padding:3px 9px; border-radius:4px; cursor:pointer; transition:all 0.15s; font-family:'IBM Plex Mono',monospace; }
 .gwb:hover { color:var(--text); }
@@ -138,6 +152,30 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .api-note { font-size:0.58rem; color:var(--muted); letter-spacing:1px; text-align:center; margin-top:6px; font-family:'IBM Plex Mono',monospace; }
 
 .hidden { display:none !important; }
+
+/* FAB chat button - mobile only */
+.chat-fab {
+  display:none;
+  position:fixed; bottom:24px; right:24px; z-index:300;
+  width:56px; height:56px; border-radius:50%;
+  background:linear-gradient(135deg,var(--g),var(--g2));
+  border:none; cursor:pointer;
+  align-items:center; justify-content:center;
+  font-size:1.4rem;
+  box-shadow: 0 4px 20px rgba(0,255,135,0.4);
+  transition:transform 0.2s, box-shadow 0.2s;
+}
+.chat-fab:hover { transform:scale(1.08); box-shadow:0 6px 28px rgba(0,255,135,0.5); }
+.chat-fab.hidden { display:none !important; }
+
+/* Close button inside chat on mobile */
+.chat-close-btn {
+  display:none;
+  background:none; border:none; color:var(--muted2);
+  font-size:1.2rem; cursor:pointer; padding:4px;
+  align-items:center; justify-content:center;
+}
+.chat-close-btn:hover { color:var(--text); }
 </style>
 </head>
 <body>
@@ -153,6 +191,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 </header>
 
 <div class="app">
+<button class="chat-fab" id="chat-fab" onclick="toggleChat()">⚡</button>
   <main class="main">
     <div class="loading" id="loading">
       <div class="spinner"></div>
@@ -190,8 +229,11 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 
   <aside class="sidebar">
     <div class="chat-header">
-      <div class="chat-title">⚡ FPL Assistent</div>
-      <div class="chat-sub">Ställ frågor om din liga</div>
+      <div>
+        <div class="chat-title">⚡ FPL Assistent</div>
+        <div class="chat-sub">Ställ frågor om din liga</div>
+      </div>
+      <button class="chat-close-btn" onclick="toggleChat()">✕</button>
     </div>
     <div class="chat-messages" id="chat-messages">
       <div class="msg msg-ai">
@@ -298,12 +340,13 @@ function renderBars(gw) {
   selectedGW=gw;
   document.getElementById('gw-selected-label').textContent=`GW ${gw}`;
   document.querySelectorAll('.gwb').forEach(b=>b.classList.toggle('active',b.textContent===`GW${gw}`));
-  const sorted=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[gw]||0})).sort((a,b)=>b.pts-a.pts);
+  const sorted=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[gw]||0,total:m.total})).sort((a,b)=>b.pts-a.pts);
   const max=Math.max(...sorted.map(s=>s.pts),1);
   document.getElementById('gw-bars').innerHTML=sorted.map((s,i)=>`
     <div class="bar-row"><div class="bar-name" title="${s.name}">${s.name}</div>
     <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s.pts/max*100).toFixed(1)}%"></div></div>
-    <div class="bar-pts">${s.pts}</div></div>`).join('');
+    <div class="bar-pts">${s.pts}</div>
+    <div class="bar-total">${s.total} tot</div></div>`).join('');
 }
 
 function renderCumChart() {
@@ -322,95 +365,72 @@ function renderCumChart() {
   });
 }
 
+// ── DATA TOOLS (exact JS calculations) ──
+const QUARTERS = {1:[1,10], 2:[11,20], 3:[21,30], 4:[31,38]};
+
+function getTools() {
+  return {
+    get_range_scores: ({from_gw, to_gw}) => {
+      const range = Array.from({length:to_gw-from_gw+1},(_,i)=>from_gw+i).filter(g=>g>=1&&g<=currentGW);
+      return managers.map(m=>({
+        name:m.player_name,
+        pts:range.reduce((s,gw)=>s+(gwHistory[m.entry]?.[gw]||0),0),
+        total:m.total
+      })).sort((a,b)=>b.pts-a.pts);
+    },
+    get_gw_scores: ({gw}) => {
+      return managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[gw]||0,total:m.total})).sort((a,b)=>b.pts-a.pts);
+    },
+    get_standings: () => managers.map((m,i)=>({rank:i+1,name:m.player_name,team:m.entry_name,total:m.total})),
+    get_cumulative: ({manager_name, gw}) => {
+      const m = managers.find(x=>x.player_name.toLowerCase().includes(manager_name.toLowerCase()));
+      if(!m) return null;
+      let cum=0;
+      return Array.from({length:gw},(_,i)=>i+1).map(g=>{cum+=gwHistory[m.entry]?.[g]||0; return {gw:g,cumulative:cum,gw_pts:gwHistory[m.entry]?.[g]||0};});
+    },
+    get_overtake_gw: ({manager1, manager2}) => {
+      const m1=managers.find(x=>x.player_name.toLowerCase().includes(manager1.toLowerCase()));
+      const m2=managers.find(x=>x.player_name.toLowerCase().includes(manager2.toLowerCase()));
+      if(!m1||!m2) return null;
+      let cum1=0,cum2=0,overtakes=[];
+      for(let gw=1;gw<=currentGW;gw++){
+        const prev1=cum1,prev2=cum2;
+        cum1+=gwHistory[m1.entry]?.[gw]||0;
+        cum2+=gwHistory[m2.entry]?.[gw]||0;
+        if(prev1<=prev2 && cum1>cum2) overtakes.push({gw,type:`${m1.player_name} gick om ${m2.player_name}`,gap:cum1-cum2});
+        if(prev2<=prev1 && cum2>cum1) overtakes.push({gw,type:`${m2.player_name} gick om ${m1.player_name}`,gap:cum2-cum1});
+      }
+      return overtakes;
+    }
+  };
+}
+
+function formatToolResult(name, result) {
+  if(!result) return "Hittade inte spelaren.";
+  if(name==="get_range_scores"||name==="get_gw_scores") {
+    return result.map((s,i)=>`${i+1}. ${s.name}: ${s.pts} pts (totalt: ${s.total})`).join("\n");
+  }
+  if(name==="get_standings") {
+    return result.map(s=>`${s.rank}. ${s.name} (${s.team}): ${s.total} pts`).join("\n");
+  }
+  if(name==="get_cumulative") {
+    return result.map(r=>`GW${r.gw}: ${r.gw_pts} pts (ackumulerat: ${r.cumulative})`).join("\n");
+  }
+  if(name==="get_overtake_gw") {
+    if(result.length===0) return "Inga förbipasseringar hittades.";
+    return result.map(r=>`GW${r.gw}: ${r.type} (gap: ${r.gap} pts)`).join("\n");
+  }
+  return JSON.stringify(result);
+}
+
 function buildContext() {
   if(!dataLoaded) return 'Data ej laddad.';
   const gws=Array.from({length:currentGW},(_,i)=>i+1);
-  let ctx=`FPL-liga ID ${LEAGUE_ID}, aktuell omgång: GW${currentGW}.\n\nLIGATABELL (totalpoäng):\n`;
+  let ctx=`FPL-liga, aktuell omgång: GW${currentGW}.\nKVARTAL: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38\n\nLIGATABELL:\n`;
   managers.forEach((m,i)=>{ ctx+=`${i+1}. ${m.player_name} (${m.entry_name}): ${m.total} pts\n`; });
   ctx+=`\nPOÄNG PER OMGÅNG:\n`;
   managers.forEach(m=>{ ctx+=`${m.player_name}: `+gws.map(gw=>`GW${gw}=${gwHistory[m.entry]?.[gw]||0}`).join(', ')+'\n'; });
   return ctx;
-}
-
-function isCalculationQuestion(q) {
-  const calcWords = ['mest','högst','lägst','bäst','sämst','flest','minst','totalt','sammanlagt',
-    'skillnad','gap','vann','vem ledde','poäng mellan','mellan gw','mellan omgång',
-    'senaste','förra','topp','ställning','alla poäng','hur många'];
-  return calcWords.some(w => q.includes(w));
-}
-
-function calcAnswer(msg) {
-  const q = msg.toLowerCase();
-
-  // Parse GW range: "mellan GW21 och 29" or "GW21-29" or "omgång 21 till 29"
-  const rangeMatch = q.match(/gw\s*(\d+)[^\d]+(\d+)|omg[åa]ng\s*(\d+)[^\d]+(\d+)/);
-  const gwFrom = rangeMatch ? parseInt(rangeMatch[1]||rangeMatch[3]) : null;
-  const gwTo   = rangeMatch ? parseInt(rangeMatch[2]||rangeMatch[4]) : null;
-
-  // Single GW
-  const gwMatch = !rangeMatch && q.match(/gw\s*(\d+)|omg[åa]ng\s*(\d+)/);
-  const gwNum   = gwMatch ? parseInt(gwMatch[1]||gwMatch[2]) : null;
-
-  // GW range query
-  if(gwFrom && gwTo) {
-    const range = Array.from({length: gwTo-gwFrom+1}, (_,i) => gwFrom+i).filter(g=>g>=1&&g<=currentGW);
-    const scored = managers.map(m=>({
-      name: m.player_name,
-      pts: range.reduce((sum,gw)=>sum+(gwHistory[m.entry]?.[gw]||0),0)
-    })).sort((a,b)=>b.pts-a.pts);
-    return `📊 **Poäng GW${gwFrom}–GW${gwTo}:**\n`+scored.map((s,i)=>`${i+1}. ${s.name}: **${s.pts} pts**`).join('\n');
-  }
-
-  // Top 3 / standings
-  if(q.includes('topp 3')||q.includes('top 3')||q.includes('ställning')||q.includes('sammanlagt')||q.includes('ledare')) {
-    return '🏆 **Topp 3 sammanlagt:**\n'+managers.slice(0,3).map((m,i)=>`${['🥇','🥈','🥉'][i]} ${m.player_name}: **${m.total} pts**`).join('\n');
-  }
-
-  // All standings
-  if(q.includes('alla')&&(q.includes('poäng')||q.includes('ställning')||q.includes('total'))) {
-    return '📋 **Totalpoäng alla:**\n'+managers.map((m,i)=>`${i+1}. ${m.player_name}: **${m.total} pts**`).join('\n');
-  }
-
-  // Specific GW highest
-  if(gwNum && (q.includes('högst')||q.includes('bäst')||q.includes('mest')||q.includes('flest')||q.includes('vann')||q.includes('vem'))) {
-    const s=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[gwNum]||0})).sort((a,b)=>b.pts-a.pts);
-    return `🏅 **Högst poäng GW${gwNum}:**\n`+s.slice(0,3).map((x,i)=>`${i+1}. ${x.name}: **${x.pts} pts**`).join('\n');
-  }
-
-  // All scores for specific GW
-  if(gwNum) {
-    const s=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[gwNum]||0})).sort((a,b)=>b.pts-a.pts);
-    return `📋 **Alla poäng GW${gwNum}:**\n`+s.map((x,i)=>`${i+1}. ${x.name}: **${x.pts} pts**`).join('\n');
-  }
-
-  // Latest GW
-  if(q.includes('senaste')||q.includes('förra')||(q.includes('högst')&&!gwNum)||(q.includes('bäst')&&!gwNum)) {
-    const s=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[currentGW]||0})).sort((a,b)=>b.pts-a.pts);
-    return `⚡ **GW${currentGW} — Alla poäng:**\n`+s.map((x,i)=>`${i+1}. ${x.name}: **${x.pts} pts**`).join('\n');
-  }
-
-  // Gap
-  if(q.includes('skillnad')||q.includes('gap')||q.includes('sista')||q.includes('sist')) {
-    const f=managers[0], l=managers[managers.length-1];
-    return `📊 **Poängskillnad:**\n1:a: ${f.player_name} (${f.total} pts)\nSista: ${l.player_name} (${l.total} pts)\nSkillnad: **${f.total-l.total} pts**`;
-  }
-
-  // Last N GWs
-  const nMatch = q.match(/senaste\s*(\d+)/);
-  const nGWs = nMatch ? parseInt(nMatch[1]) : 3;
-  if(q.includes('form')||q.includes('förbättr')||nMatch) {
-    const lastN=Array.from({length:nGWs},(_,i)=>currentGW-i).filter(g=>g>0);
-    const s=managers.map(m=>({name:m.player_name,pts:lastN.reduce((sum,gw)=>sum+(gwHistory[m.entry]?.[gw]||0),0)})).sort((a,b)=>b.pts-a.pts);
-    return `📈 **Bäst senaste ${nGWs} GW:**\n`+s.slice(0,3).map((x,i)=>`${i+1}. ${x.name}: **${x.pts} pts**`).join('\n');
-  }
-
-  // Lowest
-  if(q.includes('lägst')||q.includes('sämst')||q.includes('minst')) {
-    const s=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[currentGW]||0})).sort((a,b)=>a.pts-b.pts);
-    return `📉 **Lägst GW${currentGW}:** ${s[0].name}: **${s[0].pts} pts**`;
-  }
-
-  return null;
 }
 
 async function sendMessage(text) {
@@ -423,26 +443,63 @@ async function sendMessage(text) {
   const typing=appendTyping();
   document.getElementById('send-btn').disabled=true;
 
-  // Try JS calculation first
-  if(isCalculationQuestion(msg.toLowerCase())) {
-    const calcResult = calcAnswer(msg);
-    if(calcResult) {
-      setTimeout(()=>{ typing.remove(); appendMsg(calcResult,'ai'); document.getElementById('send-btn').disabled=false; }, 300);
-      return;
-    }
-  }
-
-  // Fall back to Groq for insight questions
   try {
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+    // Step 1: Ask Groq what tool to use
+    const planRes = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        system:`Du är en FPL-expert och analyserar en privat mini-liga. Svara alltid på svenska, var kortfattad och använd gärna emojis. VIKTIGT: Räkna INTE ut poängsummor själv — det hanteras av systemet. Fokusera på analys, insikter och resonemang. Här är all ligadata:\n\n${buildContext()}`,
-        message:msg
-      })});
+        system:`Du är en FPL-analysassistent. Du har tillgång till dessa verktyg för att hämta exakt data:
+
+VERKTYG (svara ALLTID med JSON om du behöver data, annars svara direkt):
+- get_range_scores(from_gw, to_gw) - poäng för alla spelare i ett GW-spann
+- get_gw_scores(gw) - alla spelares poäng för en specifik omgång  
+- get_standings() - aktuell ligatabell
+- get_cumulative(manager_name, gw) - ackumulerade poäng för en spelare upp till viss GW
+- get_overtake_gw(manager1, manager2) - vilka omgångar någon gick om någon annan
+
+KVARTAL: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38
+
+Om du behöver räkna eller hämta data, svara ENDAST med JSON:
+{"tool": "verktygsnamn", "params": {...}}
+
+Om frågan är en insiktsfråga som du kan svara på direkt med den data som ges, svara direkt på svenska.
+
+Här är ligadata:\n\n${buildContext()}`,
+        message: msg
+      })
+    });
+
+    const planData = await planRes.json();
+    const planText = planData.reply || '';
+
+    // Step 2: Check if Groq wants to call a tool
+    let finalReply = planText;
+    try {
+      const jsonMatch = planText.match(/\{[\s\S]*\}/);
+      if(jsonMatch) {
+        const toolCall = JSON.parse(jsonMatch[0]);
+        if(toolCall.tool && getTools()[toolCall.tool]) {
+          const toolResult = getTools()[toolCall.tool](toolCall.params || {});
+          const formatted = formatToolResult(toolCall.tool, toolResult);
+
+          // Step 3: Ask Groq to formulate answer with exact data
+          const answerRes = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+              system:`Du är en FPL-expert. Svara på svenska, kort och tydligt med emojis. Använd EXAKT den data som ges — hitta inte på egna siffror.`,
+              message:`Frågan var: "${msg}"\n\nExakt data från systemet:\n${formatted}\n\nFormulera ett tydligt svar baserat på denna data.`
+            })
+          });
+          const answerData = await answerRes.json();
+          finalReply = answerData.reply || formatted;
+        }
+      }
+    } catch(e) { /* not a tool call, use direct answer */ }
+
     typing.remove();
-    const data=await res.json();
-    appendMsg(data.reply||'Inget svar.','ai');
-  } catch(e) { typing.remove(); appendMsg('Fel vid anrop till servern.','ai'); }
+    appendMsg(finalReply, 'ai');
+  } catch(e) {
+    typing.remove();
+    appendMsg('Fel vid anrop till servern.', 'ai');
+  }
   document.getElementById('send-btn').disabled=false;
 }
 
@@ -466,6 +523,15 @@ function appendTyping() {
 }
 
 function askSuggestion(btn) { sendMessage(btn.textContent); }
+
+function toggleChat() {
+  const sidebar = document.querySelector('.sidebar');
+  const fab = document.getElementById('chat-fab');
+  const isOpen = sidebar.classList.contains('open');
+  sidebar.classList.toggle('open', !isOpen);
+  fab.textContent = isOpen ? '⚡' : '✕';
+}
+
 init();
 </script>
 </body>
