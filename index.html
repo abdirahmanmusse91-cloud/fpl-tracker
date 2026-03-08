@@ -500,10 +500,17 @@ VERKTYG (svara ALLTID med JSON om du behöver data, annars svara direkt):
 
 KVARTAL: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38
 
-Om du behöver räkna eller hämta data, svara ENDAST med JSON:
-{"tool": "verktygsnamn", "params": {...}}
+Om du behöver hämta data, svara ENDAST med JSON. För enkla frågor:
+{"tool": "verktygsnamn", "params": {...}, "label": "beskrivning"}
+
+För frågor som kräver FLERA datahämtningar (t.ex. två kvartal), svara med en array:
+[
+  {"tool": "get_range_scores", "params": {"from_gw": 1, "to_gw": 10}, "label": "Kvartal 1"},
+  {"tool": "get_range_scores", "params": {"from_gw": 11, "to_gw": 20}, "label": "Kvartal 2"}
+]
 
 Om frågan är en insiktsfråga som du kan svara på direkt med den data som ges, svara direkt på svenska.
+VIKTIGT: Svara ALDRIG med både JSON och text i samma svar.
 
 Här är ligadata:\n\n${buildContext()}`,
         message: msg
@@ -513,26 +520,42 @@ Här är ligadata:\n\n${buildContext()}`,
     const planData = await planRes.json();
     const planText = planData.reply || '';
 
-    // Step 2: Check if Groq wants to call a tool
+    // Step 2: Extract ALL tool calls (support multiple calls for multi-part questions)
     let finalReply = planText;
     try {
-      const jsonMatch = planText.match(/\{[\s\S]*\}/);
-      if(jsonMatch) {
-        const toolCall = JSON.parse(jsonMatch[0]);
+      // Match array of tool calls OR single tool call
+      let toolCalls = [];
+      const arrayMatch = planText.match(/\[[\s\S]*\]/);
+      const singleMatch = planText.match(/\{[\s\S]*"tool"[\s\S]*\}/);
+
+      if(arrayMatch) {
+        try { toolCalls = JSON.parse(arrayMatch[0]); } catch(e) {}
+      }
+      if(toolCalls.length === 0 && singleMatch) {
+        try { toolCalls = [JSON.parse(singleMatch[0])]; } catch(e) {}
+      }
+
+      // Execute all valid tool calls and collect results
+      const allResults = [];
+      for(const toolCall of toolCalls) {
         if(toolCall.tool && getTools()[toolCall.tool]) {
           const toolResult = getTools()[toolCall.tool](toolCall.params || {});
           const formatted = formatToolResult(toolCall.tool, toolResult);
-
-          // Step 3: Ask Groq to formulate answer with exact data
-          const answerRes = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-              system:`Du är en FPL-expert. Svara på svenska, kort och tydligt med emojis. Använd EXAKT och ENDAST de siffror som ges i data nedan — lägg inte till, räkna inte om, hitta inte på egna siffror. Om data saknas, säg det.`,
-              message:`Frågan var: "${msg}"\n\nExakt data från systemet:\n${formatted}\n\nFormulera ett tydligt svar baserat på denna data.`
-            })
-          });
-          const answerData = await answerRes.json();
-          finalReply = answerData.reply || formatted;
+          const label = toolCall.label || `${toolCall.tool}(${JSON.stringify(toolCall.params)})`;
+          allResults.push(`=== ${label} ===\n${formatted}`);
         }
+      }
+
+      if(allResults.length > 0) {
+        // Step 3: Ask Groq to formulate answer with ALL exact data
+        const answerRes = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            system:`Du är en FPL-expert. Svara på svenska. Var så kortfattad som möjligt — inkludera bara det som faktiskt svarar på frågan. Visa ALDRIG din tankeprocess eller hur du räknar. Bara svaret. Använd emojis. Använd EXAKT och ENDAST de siffror som ges — räkna inte om, hitta inte på egna siffror.`,
+            message:`Frågan var: "${msg}"\n\nExakt data från systemet:\n${allResults.join('\n\n')}\n\nFormulera ett tydligt och kortfattat svar baserat på denna data.`
+          })
+        });
+        const answerData = await answerRes.json();
+        finalReply = answerData.reply || allResults.join('\n\n');
       }
     } catch(e) { /* not a tool call, use direct answer */ }
 
