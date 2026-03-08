@@ -444,7 +444,13 @@ function getTools() {
 function formatToolResult(name, result) {
   if(!result) return "Hittade inte spelaren.";
   if(name==="get_range_scores"||name==="get_gw_scores") {
-    return result.map((s,i)=>`${i+1}. ${s.name}: ${s.pts} pts (totalt: ${s.total})`).join("\n");
+    return result.map((s,i)=>{
+      let label = '';
+      if(i===0) label = ' ← VINNARE';
+      else if(i===1) label = ` ← TVÅA (${result[0].pts-s.pts} pts bakom)`;
+      else if(i===2) label = ` ← TREA (${result[0].pts-s.pts} pts bakom)`;
+      return `${i+1}. ${s.name}: ${s.pts} pts${label}`;
+    }).join("\n");
   }
   if(name==="get_standings") {
     return result.map(s=>`${s.rank}. ${s.name} (${s.team}): ${s.total} pts`).join("\n");
@@ -520,7 +526,7 @@ Här är ligadata:\n\n${buildContext()}`,
           // Step 3: Ask Groq to formulate answer with exact data
           const answerRes = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
-              system:`Du är en FPL-expert. Svara på svenska, kort och tydligt med emojis. Använd EXAKT den data som ges — hitta inte på egna siffror.`,
+              system:`Du är en FPL-expert. Svara på svenska, kort och tydligt med emojis. Använd EXAKT och ENDAST de siffror som ges i data nedan — lägg inte till, räkna inte om, hitta inte på egna siffror. Om data saknas, säg det.`,
               message:`Frågan var: "${msg}"\n\nExakt data från systemet:\n${formatted}\n\nFormulera ett tydligt svar baserat på denna data.`
             })
           });
