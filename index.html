@@ -33,14 +33,18 @@ header {
   .app { grid-template-columns:1fr; }
   .sidebar {
     position:fixed; bottom:0; right:0; left:0; top:0;
-    z-index:200; transform:translateY(100%);
-    transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);
+    z-index:200;
+    transform:translateY(110%);
+    transition:transform 0.35s cubic-bezier(0.4,0,0.2,1);
     height:100vh; border-top:none;
+    background:var(--dark);
+    visibility:hidden;
   }
-  .sidebar.open { transform:translateY(0); }
-  .chat-fab {
-    display:flex !important;
+  .sidebar.open {
+    transform:translateY(0);
+    visibility:visible;
   }
+  .chat-fab { display:flex !important; }
   .chat-close-btn { display:flex !important; }
 }
 
@@ -113,7 +117,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .chart-title { font-family:'Bebas Neue',sans-serif; font-size:0.95rem; letter-spacing:2px; margin-bottom:14px; }
 
 /* SIDEBAR */
-.sidebar { display:flex; flex-direction:column; height:calc(100vh - 60px); position:sticky; top:60px; }
+.sidebar { display:flex; flex-direction:column; height:calc(100vh - 60px); position:sticky; top:60px; background:var(--dark); }
 .chat-header { padding:16px 18px; border-bottom:1px solid var(--border); background:linear-gradient(180deg,#0a140a 0%,var(--card) 100%); }
 .chat-title { font-family:'Bebas Neue',sans-serif; font-size:1.05rem; letter-spacing:2px; color:var(--g); }
 .chat-sub { font-size:0.62rem; color:var(--muted); letter-spacing:1px; text-transform:uppercase; margin-top:2px; font-family:'IBM Plex Mono',monospace; }
@@ -340,7 +344,11 @@ function renderBars(gw) {
   selectedGW=gw;
   document.getElementById('gw-selected-label').textContent=`GW ${gw}`;
   document.querySelectorAll('.gwb').forEach(b=>b.classList.toggle('active',b.textContent===`GW${gw}`));
-  const sorted=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[gw]||0,total:m.total})).sort((a,b)=>b.pts-a.pts);
+  const sorted=managers.map(m=>({
+    name:m.player_name,
+    pts:gwHistory[m.entry]?.[gw]||0,
+    total:Array.from({length:gw},(_,i)=>i+1).reduce((s,g)=>s+(gwHistory[m.entry]?.[g]||0),0)
+  })).sort((a,b)=>b.pts-a.pts);
   const max=Math.max(...sorted.map(s=>s.pts),1);
   document.getElementById('gw-bars').innerHTML=sorted.map((s,i)=>`
     <div class="bar-row"><div class="bar-name" title="${s.name}">${s.name}</div>
