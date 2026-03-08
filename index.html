@@ -404,6 +404,94 @@ function renderCumChart() {
 // ── DATA TOOLS (exact JS calculations) ──
 const QUARTERS = {1:[1,10], 2:[11,20], 3:[21,30], 4:[31,38]};
 
+// ── SMART JS QUERY ENGINE ──
+function jsAnswer(msg) {
+  const q = msg.toLowerCase();
+  const tools = getTools();
+
+  // Helper: range scores formatted
+  function rangeResult(from_gw, to_gw, label) {
+    const res = tools.get_range_scores({from_gw, to_gw});
+    const winner = res[0], second = res[1];
+    return { data: formatToolResult('get_range_scores', res), winner, second, label };
+  }
+
+  // Detect quarter number(s)
+  const quarterNums = [];
+  const qm = q.match(/kvartal\s*(\d)/g);
+  if(qm) qm.forEach(m => { const n=parseInt(m.replace(/\D/g,'')); if(QUARTERS[n]) quarterNums.push(n); });
+
+  // Quarter question
+  if(quarterNums.length > 0) {
+    const results = quarterNums.map(n => {
+      const [from,to] = QUARTERS[n];
+      return rangeResult(from, to, `Kvartal ${n} (GW${from}-GW${to})`);
+    });
+    return { type:'data', parts: results };
+  }
+
+  // GW range: "mellan GW21 och 29" or "GW21-29"
+  const rangeMatch = q.match(/gw\s*(\d+)[^\d]+(\d+)|omg[åa]ng\s*(\d+)[^\d]+(\d+)/);
+  if(rangeMatch) {
+    const from = parseInt(rangeMatch[1]||rangeMatch[3]);
+    const to   = parseInt(rangeMatch[2]||rangeMatch[4]);
+    if(from < to) return { type:'data', parts:[rangeResult(from, to, `GW${from}-GW${to}`)] };
+  }
+
+  // Single GW
+  const gwMatch = q.match(/gw\s*(\d+)|omg[åa]ng\s*(\d+)/);
+  const gwNum = gwMatch ? parseInt(gwMatch[1]||gwMatch[2]) : null;
+  if(gwNum && gwNum <= currentGW) {
+    const res = tools.get_gw_scores({gw:gwNum});
+    return { type:'data', parts:[{ data: formatToolResult('get_gw_scores', res), label:`GW${gwNum}` }] };
+  }
+
+  // Overtake question
+  const overtakeMatch = q.match(/gick om|förbi|passerade|när\s+\w+\s+gick/);
+  const names = managers.map(m=>m.player_name);
+  if(overtakeMatch) {
+    // Find two names mentioned, or default to top 2
+    const mentioned = names.filter(n => q.includes(n.split(' ')[0].toLowerCase()));
+    const m1 = mentioned[0] || managers[0].player_name;
+    const m2 = mentioned[1] || managers[1].player_name;
+    const res = tools.get_overtake_gw({manager1: m1.split(' ')[0], manager2: m2.split(' ')[0]});
+    return { type:'data', parts:[{ data: formatToolResult('get_overtake_gw', res), label:`Förbipasseringar: ${m1} vs ${m2}` }] };
+  }
+
+  // Standings
+  if(q.includes('ställning')||q.includes('tabell')||(q.includes('topp')&&!gwNum)||(q.includes('ledare'))) {
+    const res = tools.get_standings();
+    return { type:'data', parts:[{ data: formatToolResult('get_standings', res), label:'Ligatabell' }] };
+  }
+
+  // Senaste GW
+  if(q.includes('senaste omgången')||q.includes('senaste gw')||(q.includes('senaste')&&q.includes('omgång'))) {
+    const res = tools.get_gw_scores({gw:currentGW});
+    return { type:'data', parts:[{ data: formatToolResult('get_gw_scores', res), label:`Senaste omgången (GW${currentGW})` }] };
+  }
+
+  // Skillnad / gap
+  if(q.includes('skillnad')||q.includes('gap')) {
+    const res = tools.get_standings();
+    const first = res[0], last = res[res.length-1];
+    return { type:'direct', text:`📊 Skillnad 1:a vs sista:
+🥇 ${first.name}: **${first.total} pts**
+⬇️ ${last.name}: **${last.total} pts**
+Skillnad: **${first.total-last.total} pts**` };
+  }
+
+  // Last N GWs form
+  const nMatch = q.match(/senaste\s*(\d+)/);
+  if(nMatch || q.includes('form')) {
+    const n = nMatch ? parseInt(nMatch[1]) : 5;
+    const from = Math.max(1, currentGW-n+1);
+    return { type:'data', parts:[rangeResult(from, currentGW, `Senaste ${n} omgångar (GW${from}-GW${currentGW})`)] };
+  }
+
+  // Consistency / toppar / dalar — pass to Groq as insight
+  return null;
+}
+
 function getTools() {
   return {
     get_range_scores: ({from_gw, to_gw}) => {
@@ -486,81 +574,39 @@ async function sendMessage(text) {
   document.getElementById('send-btn').disabled=true;
 
   try {
-    // Step 1: Ask Groq what tool to use
-    const planRes = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        system:`Du är en FPL-analysassistent. Du har tillgång till dessa verktyg för att hämta exakt data:
+    // Step 1: Try JS engine first
+    const jsResult = jsAnswer(msg);
 
-VERKTYG (svara ALLTID med JSON om du behöver data, annars svara direkt):
-- get_range_scores(from_gw, to_gw) - poäng för alla spelare i ett GW-spann
-- get_gw_scores(gw) - alla spelares poäng för en specifik omgång  
-- get_standings() - aktuell ligatabell
-- get_cumulative(manager_name, gw) - ackumulerade poäng för en spelare upp till viss GW
-- get_overtake_gw(manager1, manager2) - vilka omgångar någon gick om någon annan
+    if(jsResult && jsResult.type === 'direct') {
+      // Pure JS answer, no Groq needed
+      setTimeout(()=>{ typing.remove(); appendMsg(jsResult.text,'ai'); document.getElementById('send-btn').disabled=false; }, 200);
+      return;
+    }
 
-KVARTAL: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38
-
-Om du behöver hämta data, svara ENDAST med JSON. För enkla frågor:
-{"tool": "verktygsnamn", "params": {...}, "label": "beskrivning"}
-
-För frågor som kräver FLERA datahämtningar (t.ex. två kvartal), svara med en array:
-[
-  {"tool": "get_range_scores", "params": {"from_gw": 1, "to_gw": 10}, "label": "Kvartal 1"},
-  {"tool": "get_range_scores", "params": {"from_gw": 11, "to_gw": 20}, "label": "Kvartal 2"}
-]
-
-Om frågan är en insiktsfråga som du kan svara på direkt med den data som ges, svara direkt på svenska.
-VIKTIGT: Svara ALDRIG med både JSON och text i samma svar.
-
-Här är ligadata:\n\n${buildContext()}`,
-        message: msg
-      })
-    });
-
-    const planData = await planRes.json();
-    const planText = planData.reply || '';
-
-    // Step 2: Extract ALL tool calls (support multiple calls for multi-part questions)
-    let finalReply = planText;
-    try {
-      // Match array of tool calls OR single tool call
-      let toolCalls = [];
-      const arrayMatch = planText.match(/\[[\s\S]*\]/);
-      const singleMatch = planText.match(/\{[\s\S]*"tool"[\s\S]*\}/);
-
-      if(arrayMatch) {
-        try { toolCalls = JSON.parse(arrayMatch[0]); } catch(e) {}
-      }
-      if(toolCalls.length === 0 && singleMatch) {
-        try { toolCalls = [JSON.parse(singleMatch[0])]; } catch(e) {}
-      }
-
-      // Execute all valid tool calls and collect results
-      const allResults = [];
-      for(const toolCall of toolCalls) {
-        if(toolCall.tool && getTools()[toolCall.tool]) {
-          const toolResult = getTools()[toolCall.tool](toolCall.params || {});
-          const formatted = formatToolResult(toolCall.tool, toolResult);
-          const label = toolCall.label || `${toolCall.tool}(${JSON.stringify(toolCall.params)})`;
-          allResults.push(`=== ${label} ===\n${formatted}`);
-        }
-      }
-
-      if(allResults.length > 0) {
-        // Step 3: Ask Groq to formulate answer with ALL exact data
-        const answerRes = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({
-            system:`Du är en FPL-expert. Svara på svenska. Var så kortfattad som möjligt — inkludera bara det som faktiskt svarar på frågan. Visa ALDRIG din tankeprocess eller hur du räknar. Bara svaret. Använd emojis. Använd EXAKT och ENDAST de siffror som ges — räkna inte om, hitta inte på egna siffror.`,
-            message:`Frågan var: "${msg}"\n\nExakt data från systemet:\n${allResults.join('\n\n')}\n\nFormulera ett tydligt och kortfattat svar baserat på denna data.`
-          })
-        });
-        const answerData = await answerRes.json();
-        finalReply = answerData.reply || allResults.join('\n\n');
-      }
-    } catch(e) { /* not a tool call, use direct answer */ }
-
-    typing.remove();
-    appendMsg(finalReply, 'ai');
+    if(jsResult && jsResult.type === 'data') {
+      // JS has exact data — send to Groq ONLY for language polish
+      const dataStr = jsResult.parts.map(p => `=== ${p.label} ===\n${p.data}`).join('\n\n');
+      const res = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          system:`Du är en FPL-expert. Svara på svenska med emojis. Var kortfattad — bara svaret, ingen tankeprocess. Använd EXAKT och ENDAST de siffror som ges nedan, ändra eller räkna inte om dem.`,
+          message:`Fråga: "${msg}"\n\nExakt data:\n${dataStr}\n\nFormulera ett kort svar med dessa exakta siffror.`
+        })
+      });
+      const data = await res.json();
+      typing.remove();
+      appendMsg(data.reply || dataStr, 'ai');
+    } else {
+      // Insight question — Groq handles with full context, no numbers expected
+      const res = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          system:`Du är en FPL-expert som analyserar en privat mini-liga. Svara på svenska med emojis. Var kortfattad. Resonera om trender, form och strategi — men hitta INTE på siffror eller poäng.\n\n${buildContext()}`,
+          message: msg
+        })
+      });
+      const data = await res.json();
+      typing.remove();
+      appendMsg(data.reply || 'Kunde inte svara.', 'ai');
+    }
   } catch(e) {
     typing.remove();
     appendMsg('Fel vid anrop till servern.', 'ai');
