@@ -327,9 +327,90 @@ function buildContext() {
   const gws=Array.from({length:currentGW},(_,i)=>i+1);
   let ctx=`FPL-liga ID ${LEAGUE_ID}, aktuell omgång: GW${currentGW}.\n\nLIGATABELL (totalpoäng):\n`;
   managers.forEach((m,i)=>{ ctx+=`${i+1}. ${m.player_name} (${m.entry_name}): ${m.total} pts\n`; });
-  ctx+=`\nPOÄNG PER OMGÅNG (netto efter avdrag):\n`;
+  ctx+=`\nPOÄNG PER OMGÅNG:\n`;
   managers.forEach(m=>{ ctx+=`${m.player_name}: `+gws.map(gw=>`GW${gw}=${gwHistory[m.entry]?.[gw]||0}`).join(', ')+'\n'; });
   return ctx;
+}
+
+function isCalculationQuestion(q) {
+  const calcWords = ['mest','högst','lägst','bäst','sämst','flest','minst','totalt','sammanlagt',
+    'skillnad','gap','vann','vem ledde','poäng mellan','mellan gw','mellan omgång',
+    'senaste','förra','topp','ställning','alla poäng','hur många'];
+  return calcWords.some(w => q.includes(w));
+}
+
+function calcAnswer(msg) {
+  const q = msg.toLowerCase();
+
+  // Parse GW range: "mellan GW21 och 29" or "GW21-29" or "omgång 21 till 29"
+  const rangeMatch = q.match(/gw\s*(\d+)[^\d]+(\d+)|omg[åa]ng\s*(\d+)[^\d]+(\d+)/);
+  const gwFrom = rangeMatch ? parseInt(rangeMatch[1]||rangeMatch[3]) : null;
+  const gwTo   = rangeMatch ? parseInt(rangeMatch[2]||rangeMatch[4]) : null;
+
+  // Single GW
+  const gwMatch = !rangeMatch && q.match(/gw\s*(\d+)|omg[åa]ng\s*(\d+)/);
+  const gwNum   = gwMatch ? parseInt(gwMatch[1]||gwMatch[2]) : null;
+
+  // GW range query
+  if(gwFrom && gwTo) {
+    const range = Array.from({length: gwTo-gwFrom+1}, (_,i) => gwFrom+i).filter(g=>g>=1&&g<=currentGW);
+    const scored = managers.map(m=>({
+      name: m.player_name,
+      pts: range.reduce((sum,gw)=>sum+(gwHistory[m.entry]?.[gw]||0),0)
+    })).sort((a,b)=>b.pts-a.pts);
+    return `📊 **Poäng GW${gwFrom}–GW${gwTo}:**\n`+scored.map((s,i)=>`${i+1}. ${s.name}: **${s.pts} pts**`).join('\n');
+  }
+
+  // Top 3 / standings
+  if(q.includes('topp 3')||q.includes('top 3')||q.includes('ställning')||q.includes('sammanlagt')||q.includes('ledare')) {
+    return '🏆 **Topp 3 sammanlagt:**\n'+managers.slice(0,3).map((m,i)=>`${['🥇','🥈','🥉'][i]} ${m.player_name}: **${m.total} pts**`).join('\n');
+  }
+
+  // All standings
+  if(q.includes('alla')&&(q.includes('poäng')||q.includes('ställning')||q.includes('total'))) {
+    return '📋 **Totalpoäng alla:**\n'+managers.map((m,i)=>`${i+1}. ${m.player_name}: **${m.total} pts**`).join('\n');
+  }
+
+  // Specific GW highest
+  if(gwNum && (q.includes('högst')||q.includes('bäst')||q.includes('mest')||q.includes('flest')||q.includes('vann')||q.includes('vem'))) {
+    const s=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[gwNum]||0})).sort((a,b)=>b.pts-a.pts);
+    return `🏅 **Högst poäng GW${gwNum}:**\n`+s.slice(0,3).map((x,i)=>`${i+1}. ${x.name}: **${x.pts} pts**`).join('\n');
+  }
+
+  // All scores for specific GW
+  if(gwNum) {
+    const s=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[gwNum]||0})).sort((a,b)=>b.pts-a.pts);
+    return `📋 **Alla poäng GW${gwNum}:**\n`+s.map((x,i)=>`${i+1}. ${x.name}: **${x.pts} pts**`).join('\n');
+  }
+
+  // Latest GW
+  if(q.includes('senaste')||q.includes('förra')||(q.includes('högst')&&!gwNum)||(q.includes('bäst')&&!gwNum)) {
+    const s=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[currentGW]||0})).sort((a,b)=>b.pts-a.pts);
+    return `⚡ **GW${currentGW} — Alla poäng:**\n`+s.map((x,i)=>`${i+1}. ${x.name}: **${x.pts} pts**`).join('\n');
+  }
+
+  // Gap
+  if(q.includes('skillnad')||q.includes('gap')||q.includes('sista')||q.includes('sist')) {
+    const f=managers[0], l=managers[managers.length-1];
+    return `📊 **Poängskillnad:**\n1:a: ${f.player_name} (${f.total} pts)\nSista: ${l.player_name} (${l.total} pts)\nSkillnad: **${f.total-l.total} pts**`;
+  }
+
+  // Last N GWs
+  const nMatch = q.match(/senaste\s*(\d+)/);
+  const nGWs = nMatch ? parseInt(nMatch[1]) : 3;
+  if(q.includes('form')||q.includes('förbättr')||nMatch) {
+    const lastN=Array.from({length:nGWs},(_,i)=>currentGW-i).filter(g=>g>0);
+    const s=managers.map(m=>({name:m.player_name,pts:lastN.reduce((sum,gw)=>sum+(gwHistory[m.entry]?.[gw]||0),0)})).sort((a,b)=>b.pts-a.pts);
+    return `📈 **Bäst senaste ${nGWs} GW:**\n`+s.slice(0,3).map((x,i)=>`${i+1}. ${x.name}: **${x.pts} pts**`).join('\n');
+  }
+
+  // Lowest
+  if(q.includes('lägst')||q.includes('sämst')||q.includes('minst')) {
+    const s=managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[currentGW]||0})).sort((a,b)=>a.pts-b.pts);
+    return `📉 **Lägst GW${currentGW}:** ${s[0].name}: **${s[0].pts} pts**`;
+  }
+
+  return null;
 }
 
 async function sendMessage(text) {
@@ -341,10 +422,21 @@ async function sendMessage(text) {
   document.getElementById('suggestions').style.display='none';
   const typing=appendTyping();
   document.getElementById('send-btn').disabled=true;
+
+  // Try JS calculation first
+  if(isCalculationQuestion(msg.toLowerCase())) {
+    const calcResult = calcAnswer(msg);
+    if(calcResult) {
+      setTimeout(()=>{ typing.remove(); appendMsg(calcResult,'ai'); document.getElementById('send-btn').disabled=false; }, 300);
+      return;
+    }
+  }
+
+  // Fall back to Groq for insight questions
   try {
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        system:`Du är en FPL-expert och analyserar en privat mini-liga. Svara alltid på svenska, var kortfattad och använd gärna emojis. Här är all ligadata:\n\n${buildContext()}`,
+        system:`Du är en FPL-expert och analyserar en privat mini-liga. Svara alltid på svenska, var kortfattad och använd gärna emojis. VIKTIGT: Räkna INTE ut poängsummor själv — det hanteras av systemet. Fokusera på analys, insikter och resonemang. Här är all ligadata:\n\n${buildContext()}`,
         message:msg
       })});
     typing.remove();
