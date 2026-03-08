@@ -141,7 +141,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .dot:nth-child(2){animation-delay:0.2s} .dot:nth-child(3){animation-delay:0.4s}
 @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
 
-.suggestions { padding:0 14px 10px; display:flex; flex-direction:column; gap:5px; }
+.suggestions { padding:10px 0 4px; display:flex; flex-direction:column; gap:5px; }
 .suggest-btn { background:rgba(0,255,135,0.04); border:1px solid var(--border2); color:var(--muted2); font-size:0.7rem; padding:7px 11px; border-radius:6px; cursor:pointer; text-align:left; transition:all 0.15s; font-family:'DM Sans',sans-serif; }
 .suggest-btn:hover { background:rgba(0,255,135,0.08); color:var(--text); border-color:rgba(0,255,135,0.2); }
 
@@ -180,6 +180,11 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
   align-items:center; justify-content:center;
 }
 .chat-close-btn:hover { color:var(--text); }
+
+/* Bar mode toggle */
+.bar-toggle { display:flex; gap:4px; }
+.bar-toggle-btn { font-size:0.6rem; letter-spacing:1px; padding:3px 10px; border-radius:4px; border:1px solid var(--border2); background:transparent; color:var(--muted); cursor:pointer; font-family:'IBM Plex Mono',monospace; transition:all 0.15s; }
+.bar-toggle-btn.active { background:var(--g); color:#000; border-color:var(--g); font-weight:600; }
 </style>
 </head>
 <body>
@@ -219,7 +224,16 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
       </div>
       <div class="sec">Poäng per omgång</div>
       <div class="gw-section">
-        <div class="gw-head"><div class="table-title">Jämförelse</div><div class="table-tag" id="gw-selected-label">GW —</div></div>
+        <div class="gw-head">
+          <div class="table-title">Jämförelse</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="bar-toggle">
+              <button class="bar-toggle-btn active" id="toggle-gw" onclick="setBarMode('gw')">GW</button>
+              <button class="bar-toggle-btn" id="toggle-total" onclick="setBarMode('total')">TOTAL</button>
+            </div>
+            <div class="table-tag" id="gw-selected-label">GW —</div>
+          </div>
+        </div>
         <div class="gw-bars" id="gw-bars"></div>
         <div class="gw-nav" id="gw-nav"></div>
       </div>
@@ -244,12 +258,12 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
         <div class="bubble bubble-ai">Hej! Jag kan svara på frågor om din liga. Ställ en fråga eller välj ett förslag 👇</div>
         <div class="msg-time">Nu</div>
       </div>
-    </div>
-    <div class="suggestions" id="suggestions">
-      <button class="suggest-btn" onclick="askSuggestion(this)">Vem hade högst poäng senaste omgången?</button>
-      <button class="suggest-btn" onclick="askSuggestion(this)">Visa topp 3 sammanlagt</button>
-      <button class="suggest-btn" onclick="askSuggestion(this)">Vem har förbättrat sig mest de senaste 3 GW?</button>
-      <button class="suggest-btn" onclick="askSuggestion(this)">Hur stor är skillnaden mellan 1:a och sista?</button>
+      <div class="suggestions" id="suggestions">
+        <button class="suggest-btn" onclick="askSuggestion(this)">Vem hade högst poäng senaste omgången?</button>
+        <button class="suggest-btn" onclick="askSuggestion(this)">Visa topp 3 sammanlagt</button>
+        <button class="suggest-btn" onclick="askSuggestion(this)">Vem har förbättrat sig mest de senaste 3 GW?</button>
+        <button class="suggest-btn" onclick="askSuggestion(this)">Hur stor är skillnaden mellan 1:a och sista?</button>
+      </div>
     </div>
     <div class="chat-input-wrap">
       <div class="chat-input-row">
@@ -340,21 +354,35 @@ function render() {
   renderCumChart();
 }
 
+let barMode = 'gw';
+
+function setBarMode(mode) {
+  barMode = mode;
+  document.getElementById('toggle-gw').classList.toggle('active', mode==='gw');
+  document.getElementById('toggle-total').classList.toggle('active', mode==='total');
+  renderBars(selectedGW);
+}
+
 function renderBars(gw) {
   selectedGW=gw;
   document.getElementById('gw-selected-label').textContent=`GW ${gw}`;
   document.querySelectorAll('.gwb').forEach(b=>b.classList.toggle('active',b.textContent===`GW${gw}`));
-  const sorted=managers.map(m=>({
+  const data=managers.map(m=>({
     name:m.player_name,
-    pts:gwHistory[m.entry]?.[gw]||0,
+    gw_pts:gwHistory[m.entry]?.[gw]||0,
     total:Array.from({length:gw},(_,i)=>i+1).reduce((s,g)=>s+(gwHistory[m.entry]?.[g]||0),0)
-  })).sort((a,b)=>b.pts-a.pts);
-  const max=Math.max(...sorted.map(s=>s.pts),1);
+  }));
+  const sorted = barMode==='total'
+    ? [...data].sort((a,b)=>b.total-a.total)
+    : [...data].sort((a,b)=>b.gw_pts-a.gw_pts);
+  const mainVal = s => barMode==='total' ? s.total : s.gw_pts;
+  const subVal  = s => barMode==='total' ? `${s.gw_pts} gw` : `${s.total} tot`;
+  const max=Math.max(...sorted.map(s=>mainVal(s)),1);
   document.getElementById('gw-bars').innerHTML=sorted.map((s,i)=>`
     <div class="bar-row"><div class="bar-name" title="${s.name}">${s.name}</div>
-    <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s.pts/max*100).toFixed(1)}%"></div></div>
-    <div class="bar-pts">${s.pts}</div>
-    <div class="bar-total">${s.total} tot</div></div>`).join('');
+    <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(mainVal(s)/max*100).toFixed(1)}%"></div></div>
+    <div class="bar-pts">${mainVal(s)}</div>
+    <div class="bar-total">${subVal(s)}</div></div>`).join('');
 }
 
 function renderCumChart() {
