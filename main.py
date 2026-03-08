@@ -54,7 +54,7 @@ async def chat(body: dict):
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={
-                "model": "llama-3.1-8b-instant",
+                "model": "llama-3.3-70b-versatile",
                 "messages": [
                     {"role": "system", "content": body.get("system", "Du är en FPL-expert. Svara på svenska.")},
                     {"role": "user", "content": body.get("message", "")}
