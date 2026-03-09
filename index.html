@@ -31,9 +31,7 @@ header {
 @media(max-width:800px){
   .app { grid-template-columns:1fr; }
   .sidebar {
-    position:fixed; top:0; left:0; right:0;
-    /* 100dvh = dynamic viewport height: shrinks when iOS keyboard opens */
-    height:100dvh;
+    position:fixed; top:0; bottom:0; left:0; right:0;
     z-index:200;
     display:flex; flex-direction:column;
     transform:translateY(110%);
@@ -691,7 +689,8 @@ function toggleChat() {
     const msgs = document.getElementById('chat-messages');
     msgs.scrollTop = msgs.scrollHeight;
     // Small delay so layout settles before focusing (prevents jump on iOS)
-    setTimeout(() => document.getElementById('chat-input').focus(), 50);
+    // Only auto-focus on desktop — on mobile keyboard pops up before layout settles
+    if (window.innerWidth > 800) document.getElementById('chat-input').focus();
   }
 }
 
