@@ -47,7 +47,7 @@ header {
   }
   .chat-fab { display:flex !important; }
   .chat-close-btn { display:flex !important; }
-  body.chat-open { overflow:hidden; position:fixed; width:100%; }
+  body.chat-open { overflow:hidden; }
   /* Table responsiveness */
   .table-card { overflow-x:auto; }
   th, td { padding:8px 10px; font-size:0.75rem; }
@@ -293,64 +293,31 @@ async function get(path) {
   return r.json();
 }
 
-const LS_KEY = 'fpl_big_blinds_v1';
-
-function showDashboard() {
-  selectedGW = currentGW;
-  dataLoaded = true;
-  document.getElementById('loading').classList.add('hidden');
-  document.getElementById('dashboard').classList.remove('hidden');
-  document.getElementById('send-btn').disabled = false;
-  document.getElementById('gw-pill').textContent = `GW ${currentGW}`;
-  document.getElementById('gw-pill').classList.remove('hidden');
-  render();
-}
-
 async function init() {
-  // Try localStorage — valid if same currentGW as last fetch
   try {
-    const cached = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
-    if (cached) {
-      managers   = cached.managers;
-      gwHistory  = cached.gwHistory;
-      currentGW  = cached.currentGW;
-      showDashboard();
-
-      // Refresh silently in background if data is older than 5 min
-      if (Date.now() - cached.ts > 5 * 60 * 1000) {
-        refreshData(cached.currentGW);
-      }
-      return;
+    const data = await get(`/api/dashboard/${LEAGUE_ID}`);
+    managers  = data.managers;
+    currentGW = data.current_gw;
+    gwHistory = {};
+    for (const [eid, hist] of Object.entries(data.gw_history)) {
+      gwHistory[parseInt(eid)] = Object.fromEntries(
+        Object.entries(hist).map(([gw, pts]) => [parseInt(gw), pts])
+      );
     }
-  } catch {}
-
-  // No cache — fetch fresh
-  try {
-    await refreshData(null);
+    selectedGW = currentGW;
+    dataLoaded = true;
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+    document.getElementById('send-btn').disabled = false;
+    document.getElementById('gw-pill').textContent = `GW ${currentGW}`;
+    document.getElementById('gw-pill').classList.remove('hidden');
+    render();
   } catch(e) {
     document.getElementById('loading').classList.add('hidden');
     const eb = document.getElementById('error-box');
     eb.style.display = 'block';
     eb.innerHTML = `<strong>Kunde inte hämta data.</strong><br>${e.message}`;
   }
-}
-
-async function refreshData(knownGW) {
-  const data = await get(`/api/dashboard/${LEAGUE_ID}`);
-  managers   = data.managers;
-  currentGW  = data.current_gw;
-  // gw_history keys are integers from Python dict
-  gwHistory  = {};
-  for (const [eid, hist] of Object.entries(data.gw_history)) {
-    gwHistory[parseInt(eid)] = Object.fromEntries(
-      Object.entries(hist).map(([gw, pts]) => [parseInt(gw), pts])
-    );
-  }
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify({ts: Date.now(), managers, gwHistory, currentGW}));
-  } catch {}
-  // Only re-render if GW changed (silent refresh) or first load
-  if (knownGW !== currentGW || !dataLoaded) showDashboard();
 }
 
 function render() {
@@ -647,7 +614,7 @@ async function runFunctionCalling(question) {
       return choice.message.content;
     }
   }
-  return 'Kunde inte generera svar.';
+  return 'Jag förstår inte frågan, kan du omformulera den? 🙏';
 }
 
 async function callGroq(body) {
@@ -710,15 +677,36 @@ function toggleChat() {
   const sidebar = document.querySelector('.sidebar');
   const fab = document.getElementById('chat-fab');
   const isOpen = sidebar.classList.contains('open');
+  if (isOpen) {
+    // Reset dynamic keyboard adjustments when closing
+    sidebar.style.height = '';
+    sidebar.style.top = '';
+  }
   sidebar.classList.toggle('open', !isOpen);
   fab.classList.toggle('hidden', !isOpen);
   document.body.classList.toggle('chat-open', !isOpen);
   if (!isOpen) {
     const msgs = document.getElementById('chat-messages');
     msgs.scrollTop = msgs.scrollHeight;
-    document.getElementById('chat-input').focus();
+    // Small delay so layout settles before focusing (prevents jump on iOS)
+    setTimeout(() => document.getElementById('chat-input').focus(), 50);
   }
 }
+
+// Adjust sidebar height when iOS keyboard opens/closes
+(function setupKeyboardResize() {
+  if (!window.visualViewport) return;
+  const sidebar = document.querySelector('.sidebar');
+  window.visualViewport.addEventListener('resize', () => {
+    if (!sidebar.classList.contains('open')) return;
+    const vvh = window.visualViewport.height;
+    sidebar.style.height = vvh + 'px';
+    sidebar.style.top = window.visualViewport.offsetTop + 'px';
+    // Keep input in view
+    const msgs = document.getElementById('chat-messages');
+    if (msgs) msgs.scrollTop = msgs.scrollHeight;
+  });
+})();
 
 init();
 </script>

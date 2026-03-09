@@ -1,6 +1,7 @@
 import os
 import time
 import asyncio
+from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -31,6 +32,9 @@ SB_HEADERS = {
     "Content-Type": "application/json",
 }
 
+# How old the current GW entry in Supabase may be before we re-fetch from FPL
+CURRENT_GW_TTL = timedelta(minutes=15)
+
 # ── Bootstrap in-memory cache ──
 _boot: dict | None = None
 _boot_ts: float = 0
@@ -56,10 +60,10 @@ def get_finished_gws(boot: dict) -> tuple[list[int], int]:
     return finished, current
 
 
-# ── Supabase helpers (graceful — never raise) ──
+# ── Supabase helpers ──
 
 async def sb_read(entry_id: int) -> dict[int, int]:
-    """Read cached GW→net_points for an entry. Returns {} on any failure."""
+    """Read cached GW→net_points for a single entry. Returns {} on any failure."""
     try:
         async with httpx.AsyncClient(timeout=6) as c:
             r = await c.get(
@@ -78,11 +82,53 @@ async def sb_read(entry_id: int) -> dict[int, int]:
     return {}
 
 
+async def sb_read_all(
+    entry_ids: list[int],
+) -> tuple[dict[int, dict[int, int]], dict[int, dict[int, datetime]]]:
+    """
+    Batch read all GW data for multiple entries in one Supabase query.
+    Returns:
+      gw_history[entry_id][gw] = net_points
+      synced_at_map[entry_id][gw] = datetime (UTC)
+    """
+    gw_history: dict[int, dict[int, int]] = {eid: {} for eid in entry_ids}
+    synced_at_map: dict[int, dict[int, datetime]] = {eid: {} for eid in entry_ids}
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(
+                f"{SUPABASE_URL}/rest/v1/gw_cache",
+                headers=SB_HEADERS,
+                params={
+                    "entry_id": f"in.({','.join(str(e) for e in entry_ids)})",
+                    "select": "entry_id,gw,points,synced_at",
+                },
+            )
+        if r.status_code == 200:
+            for row in r.json():
+                eid = row["entry_id"]
+                gw = row["gw"]
+                gw_history[eid][gw] = row["points"]
+                raw_ts = row.get("synced_at")
+                if raw_ts:
+                    try:
+                        ts = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+                        synced_at_map[eid][gw] = ts
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return gw_history, synced_at_map
+
+
 async def sb_write(entry_id: int, data: dict[int, int]) -> None:
-    """Upsert net points per GW. Silently ignores failures."""
+    """Upsert net points per GW, always writing synced_at so staleness checks work."""
     if not data:
         return
-    rows = [{"entry_id": entry_id, "gw": gw, "points": pts} for gw, pts in data.items()]
+    now = datetime.now(timezone.utc).isoformat()
+    rows = [
+        {"entry_id": entry_id, "gw": gw, "points": pts, "synced_at": now}
+        for gw, pts in data.items()
+    ]
     try:
         async with httpx.AsyncClient(timeout=8) as c:
             await c.post(
@@ -94,39 +140,106 @@ async def sb_write(entry_id: int, data: dict[int, int]) -> None:
         pass
 
 
-# ── FPL proxy endpoints ──
+# ── Dashboard — single endpoint for frontend ──
 
-@app.get("/api/league/{league_id}")
-async def get_league(league_id: int):
+@app.get("/api/dashboard/{league_id}")
+async def dashboard(league_id: int, background_tasks: BackgroundTasks):
+    """
+    Returns all data the frontend needs in one call.
+
+    Caching strategy:
+    - Historical GWs (all finished except current): read from Supabase permanently.
+      FPL is only contacted if a GW is missing entirely from Supabase.
+    - Current GW: use Supabase if synced_at < CURRENT_GW_TTL (15 min).
+      Otherwise re-fetch from FPL and update Supabase.
+    - League standings: always from FPL (lightweight, changes each GW).
+    """
+    boot = await get_bootstrap()
+    all_finished, current_gw = get_finished_gws(boot)
+    historical_set = set(gw for gw in all_finished if gw < current_gw)
+
+    # League standings — always from FPL (provides manager list + totals)
     async with httpx.AsyncClient(timeout=15) as c:
-        r = await c.get(
+        league_r = await c.get(
             f"{FPL_BASE}/leagues-classic/{league_id}/standings/", headers=FPL_HEADERS
         )
-        if r.status_code != 200:
-            raise HTTPException(status_code=r.status_code, detail="FPL API error")
-        return r.json()
+        if league_r.status_code != 200:
+            raise HTTPException(status_code=league_r.status_code, detail="FPL API error")
+        managers = league_r.json()["standings"]["results"]
+
+    entry_ids = [m["entry"] for m in managers]
+
+    # One Supabase batch query — all entries, all GWs, including synced_at
+    gw_history, synced_at_map = await sb_read_all(entry_ids)
+
+    now = datetime.now(timezone.utc)
+
+    # Decide what needs a live FPL fetch
+    needs_current: list[int] = []          # entries where current GW is stale/missing
+    needs_historical: dict[int, set[int]] = {}  # entry -> set of missing historical GWs
+
+    for eid in entry_ids:
+        # Current GW: stale if synced_at is missing or older than TTL
+        current_ts = synced_at_map.get(eid, {}).get(current_gw)
+        if current_ts is None or (now - current_ts) > CURRENT_GW_TTL:
+            needs_current.append(eid)
+
+        # Historical GWs: permanent — only fetch if genuinely missing from Supabase
+        missing = historical_set - set(gw_history.get(eid, {}).keys())
+        if missing:
+            needs_historical[eid] = missing
+
+    entries_to_fetch = set(needs_current) | set(needs_historical.keys())
+
+    if entries_to_fetch:
+        to_cache: dict[int, dict[int, int]] = {}
+
+        async def fetch_entry(entry_id: int):
+            try:
+                async with httpx.AsyncClient(timeout=15) as c:
+                    r = await c.get(
+                        f"{FPL_BASE}/entry/{entry_id}/history/", headers=FPL_HEADERS
+                    )
+                    data = r.json()
+                new_data: dict[int, int] = {}
+                for gw_row in data.get("current", []):
+                    gw_num = gw_row["event"]
+                    pts = gw_row["points"] - (gw_row.get("event_transfers_cost") or 0)
+                    if gw_num == current_gw and entry_id in needs_current:
+                        gw_history[entry_id][current_gw] = pts
+                        new_data[current_gw] = pts
+                    elif gw_num in needs_historical.get(entry_id, set()):
+                        gw_history[entry_id][gw_num] = pts
+                        new_data[gw_num] = pts
+                if new_data:
+                    to_cache[entry_id] = new_data
+            except Exception:
+                pass
+
+        await asyncio.gather(*[fetch_entry(eid) for eid in entries_to_fetch])
+
+        for eid, data in to_cache.items():
+            background_tasks.add_task(sb_write, eid, data)
+
+    return {
+        "managers": managers,
+        "gw_history": gw_history,
+        "current_gw": current_gw,
+    }
 
 
-@app.get("/api/bootstrap")
-async def bootstrap():
-    return await get_bootstrap()
-
+# ── Legacy per-entry history endpoint (kept for compatibility) ──
 
 @app.get("/api/entry/{entry_id}/history")
 async def get_history(entry_id: int, background_tasks: BackgroundTasks):
     boot = await get_bootstrap()
     all_finished, current_gw = get_finished_gws(boot)
-
-    # Historical = all finished GWs except the current one
-    # (current GW may still have pending bonus points)
     historical_set = set(gw for gw in all_finished if gw < current_gw)
 
-    # ── Try Supabase cache ──
     cached = await sb_read(entry_id)
     cached_gws = set(cached.keys())
 
     if historical_set and historical_set.issubset(cached_gws):
-        # Cache hit: fetch only the current (live) GW from FPL
         async with httpx.AsyncClient(timeout=15) as c:
             r = await c.get(
                 f"{FPL_BASE}/entry/{entry_id}/history/", headers=FPL_HEADERS
@@ -135,7 +248,6 @@ async def get_history(entry_id: int, background_tasks: BackgroundTasks):
                 raise HTTPException(status_code=r.status_code, detail="FPL API error")
             live = r.json()
 
-        # Reconstruct response: cached history + live current GW
         result = [
             {"event": gw, "points": pts, "event_transfers_cost": 0}
             for gw, pts in sorted(cached.items())
@@ -146,10 +258,8 @@ async def get_history(entry_id: int, background_tasks: BackgroundTasks):
         )
         if live_current:
             result.append(live_current)
-
         return {"current": result, "chips": live.get("chips", []), "past": live.get("past", [])}
 
-    # ── Cache miss: fetch all from FPL, update cache in background ──
     async with httpx.AsyncClient(timeout=15) as c:
         r = await c.get(f"{FPL_BASE}/entry/{entry_id}/history/", headers=FPL_HEADERS)
         if r.status_code != 200:
@@ -162,90 +272,17 @@ async def get_history(entry_id: int, background_tasks: BackgroundTasks):
         if gw["event"] in historical_set
     }
     background_tasks.add_task(sb_write, entry_id, to_cache)
-
     return data
 
 
-# ── Dashboard batch endpoint ──
+# ── Bootstrap proxy ──
 
-@app.get("/api/dashboard/{league_id}")
-async def dashboard(league_id: int, background_tasks: BackgroundTasks):
-    """
-    Returns everything the frontend needs in one response:
-    - managers (league standings from FPL)
-    - gw_history: all historical GWs from Supabase, current GW live from FPL
-    - current_gw
-    This avoids N separate entry/history calls from the frontend.
-    """
-    boot = await get_bootstrap()
-    all_finished, current_gw = get_finished_gws(boot)
-    historical_set = set(gw for gw in all_finished if gw < current_gw)
-
-    # League standings from FPL
-    async with httpx.AsyncClient(timeout=15) as c:
-        league_r = await c.get(
-            f"{FPL_BASE}/leagues-classic/{league_id}/standings/", headers=FPL_HEADERS
-        )
-        if league_r.status_code != 200:
-            raise HTTPException(status_code=league_r.status_code, detail="FPL API error")
-        managers = league_r.json()["standings"]["results"]
-
-    entry_ids = [m["entry"] for m in managers]
-    gw_history: dict[int, dict[int, int]] = {eid: {} for eid in entry_ids}
-
-    # ONE Supabase query for all managers' historical data
-    try:
-        async with httpx.AsyncClient(timeout=10) as c:
-            r = await c.get(
-                f"{SUPABASE_URL}/rest/v1/gw_cache",
-                headers=SB_HEADERS,
-                params={
-                    "entry_id": f"in.({','.join(str(e) for e in entry_ids)})",
-                    "select": "entry_id,gw,points",
-                },
-            )
-        if r.status_code == 200:
-            for row in r.json():
-                gw_history[row["entry_id"]][row["gw"]] = row["points"]
-    except Exception:
-        pass
-
-    # Current GW: always fetch live from FPL (parallel for all managers)
-    # Also fills in any historical GWs missing from Supabase
-    to_cache_all: dict[int, dict[int, int]] = {}
-
-    async def fetch_entry(entry_id: int):
-        try:
-            async with httpx.AsyncClient(timeout=15) as c:
-                r = await c.get(f"{FPL_BASE}/entry/{entry_id}/history/", headers=FPL_HEADERS)
-                data = r.json()
-            missing_historical = {}
-            for gw in data.get("current", []):
-                pts = gw["points"] - (gw.get("event_transfers_cost") or 0)
-                if gw["event"] == current_gw:
-                    gw_history[entry_id][current_gw] = pts
-                elif gw["event"] in historical_set and gw["event"] not in gw_history[entry_id]:
-                    gw_history[entry_id][gw["event"]] = pts
-                    missing_historical[gw["event"]] = pts
-            if missing_historical:
-                to_cache_all[entry_id] = missing_historical
-        except Exception:
-            pass
-
-    await asyncio.gather(*[fetch_entry(eid) for eid in entry_ids])
-
-    # Cache any missing historical data in background
-    for eid, data in to_cache_all.items():
-        background_tasks.add_task(sb_write, eid, data)
-
-    return {
-        "managers": managers,
-        "gw_history": gw_history,
-        "current_gw": current_gw,
-    }
+@app.get("/api/bootstrap")
+async def bootstrap():
+    return await get_bootstrap()
 
 
-# ── Sync endpoint (called by cron job) ──
+# ── Sync endpoint (cron job) ──
 
 LEAGUE_ID = 1076120
 
@@ -273,7 +310,7 @@ async def sync_all():
         try:
             cached = await sb_read(entry_id)
             if historical_set.issubset(set(cached.keys())):
-                return  # Already up to date
+                return
             async with httpx.AsyncClient(timeout=15) as c:
                 r = await c.get(
                     f"{FPL_BASE}/entry/{entry_id}/history/", headers=FPL_HEADERS
@@ -293,7 +330,7 @@ async def sync_all():
     return {"synced": synced, "total": len(entries), "gws_cached": sorted(historical_set)}
 
 
-# ── Groq chat (function calling) ──
+# ── Groq chat ──
 
 @app.post("/api/chat")
 async def chat(body: dict):
