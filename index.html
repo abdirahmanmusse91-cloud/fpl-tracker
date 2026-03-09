@@ -36,9 +36,11 @@ header {
     z-index:200;
     transform:translateY(110%);
     transition:transform 0.35s cubic-bezier(0.4,0,0.2,1);
-    height:100vh; border-top:none;
+    height:100dvh; height:-webkit-fill-available;
+    border-top:none;
     background:var(--dark);
     visibility:hidden;
+    overscroll-behavior:none;
   }
   .sidebar.open {
     transform:translateY(0);
@@ -46,6 +48,7 @@ header {
   }
   .chat-fab { display:flex !important; }
   .chat-close-btn { display:flex !important; }
+  body.chat-open { overflow:hidden; position:fixed; width:100%; }
 }
 
 .main { padding:24px 20px; overflow-y:auto; border-right:1px solid var(--border); }
@@ -145,7 +148,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .suggest-btn { background:rgba(0,255,135,0.04); border:1px solid var(--border2); color:var(--muted2); font-size:0.7rem; padding:7px 11px; border-radius:6px; cursor:pointer; text-align:left; transition:all 0.15s; font-family:'DM Sans',sans-serif; }
 .suggest-btn:hover { background:rgba(0,255,135,0.08); color:var(--text); border-color:rgba(0,255,135,0.2); }
 
-.chat-input-wrap { padding:10px 14px; border-top:1px solid var(--border); background:var(--card); }
+.chat-input-wrap { padding:10px 14px; padding-bottom:max(10px, env(safe-area-inset-bottom)); border-top:1px solid var(--border); background:var(--card); }
 .chat-input-row { display:flex; gap:7px; }
 .chat-input { flex:1; background:var(--dark); border:1px solid var(--border2); color:var(--text); font-family:'DM Sans',sans-serif; font-size:0.8rem; padding:9px 12px; border-radius:8px; outline:none; transition:border-color 0.15s; height:38px; }
 .chat-input:focus { border-color:rgba(0,255,135,0.3); }
@@ -270,7 +273,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
         <input class="chat-input" id="chat-input" placeholder="Fråga om din liga…" onkeydown="if(event.key==='Enter')sendMessage()">
         <button class="send-btn" id="send-btn" onclick="sendMessage()" disabled>➤</button>
       </div>
-      <div class="api-note">Drivs av Claude · Live ligadata</div>
+      <div class="api-note">Drivs av Groq · Live ligadata</div>
     </div>
   </aside>
 </div>
@@ -401,217 +404,169 @@ function renderCumChart() {
   });
 }
 
-// ── DATA TOOLS (exact JS calculations) ──
+// ── TOOL IMPLEMENTATIONS (exact JS calculations, no Groq involvement) ──
 const QUARTERS = {1:[1,10], 2:[11,20], 3:[21,30], 4:[31,38]};
-
-// ── SMART JS QUERY ENGINE ──
-function jsAnswer(msg) {
-  const q = msg.toLowerCase();
-  const tools = getTools();
-
-  // Helper: range scores formatted
-  function rangeResult(from_gw, to_gw, label) {
-    const res = tools.get_range_scores({from_gw, to_gw});
-    const winner = res[0], second = res[1];
-    return { data: formatToolResult('get_range_scores', res), winner, second, label };
-  }
-
-  // Detect quarter number(s)
-  const quarterNums = [];
-  const qm = q.match(/kvartal\s*(\d)/g);
-  if(qm) qm.forEach(m => { const n=parseInt(m.replace(/\D/g,'')); if(QUARTERS[n]) quarterNums.push(n); });
-
-  // Quarter question
-  if(quarterNums.length > 0) {
-    const results = quarterNums.map(n => {
-      const [from,to] = QUARTERS[n];
-      return rangeResult(from, to, `Kvartal ${n} (GW${from}-GW${to})`);
-    });
-    return { type:'data', parts: results };
-  }
-
-  // GW range: "mellan GW21 och 29" or "GW21-29"
-  const rangeMatch = q.match(/gw\s*(\d+)[^\d]+(\d+)|omg[åa]ng\s*(\d+)[^\d]+(\d+)/);
-  if(rangeMatch) {
-    const from = parseInt(rangeMatch[1]||rangeMatch[3]);
-    const to   = parseInt(rangeMatch[2]||rangeMatch[4]);
-    if(from < to) return { type:'data', parts:[rangeResult(from, to, `GW${from}-GW${to}`)] };
-  }
-
-  // Single GW
-  const gwMatch = q.match(/gw\s*(\d+)|omg[åa]ng\s*(\d+)/);
-  const gwNum = gwMatch ? parseInt(gwMatch[1]||gwMatch[2]) : null;
-  if(gwNum && gwNum <= currentGW) {
-    const res = tools.get_gw_scores({gw:gwNum});
-    return { type:'data', parts:[{ data: formatToolResult('get_gw_scores', res), label:`GW${gwNum}` }] };
-  }
-
-  // Overtake question
-  const overtakeMatch = q.match(/gick om|förbi|passerade|när\s+\w+\s+gick/);
-  const names = managers.map(m=>m.player_name);
-  if(overtakeMatch) {
-    // Find two names mentioned, or default to top 2
-    const mentioned = names.filter(n => q.includes(n.split(' ')[0].toLowerCase()));
-    const m1 = mentioned[0] || managers[0].player_name;
-    const m2 = mentioned[1] || managers[1].player_name;
-    const res = tools.get_overtake_gw({manager1: m1.split(' ')[0], manager2: m2.split(' ')[0]});
-    return { type:'data', parts:[{ data: formatToolResult('get_overtake_gw', res), label:`Förbipasseringar: ${m1} vs ${m2}` }] };
-  }
-
-  // Standings
-  if(q.includes('ställning')||q.includes('tabell')||(q.includes('topp')&&!gwNum)||(q.includes('ledare'))) {
-    const res = tools.get_standings();
-    return { type:'data', parts:[{ data: formatToolResult('get_standings', res), label:'Ligatabell' }] };
-  }
-
-  // Senaste GW
-  if(q.includes('senaste omgången')||q.includes('senaste gw')||(q.includes('senaste')&&q.includes('omgång'))) {
-    const res = tools.get_gw_scores({gw:currentGW});
-    return { type:'data', parts:[{ data: formatToolResult('get_gw_scores', res), label:`Senaste omgången (GW${currentGW})` }] };
-  }
-
-  // Skillnad / gap
-  if(q.includes('skillnad')||q.includes('gap')) {
-    const res = tools.get_standings();
-    const first = res[0], last = res[res.length-1];
-    return { type:'direct', text:`📊 Skillnad 1:a vs sista:
-🥇 ${first.name}: **${first.total} pts**
-⬇️ ${last.name}: **${last.total} pts**
-Skillnad: **${first.total-last.total} pts**` };
-  }
-
-  // Last N GWs form
-  const nMatch = q.match(/senaste\s*(\d+)/);
-  if(nMatch || q.includes('form')) {
-    const n = nMatch ? parseInt(nMatch[1]) : 5;
-    const from = Math.max(1, currentGW-n+1);
-    return { type:'data', parts:[rangeResult(from, currentGW, `Senaste ${n} omgångar (GW${from}-GW${currentGW})`)] };
-  }
-
-  // Consistency / toppar / dalar — pass to Groq as insight
-  return null;
-}
 
 function getTools() {
   return {
+    get_standings: () =>
+      managers.map((m,i) => ({rank:i+1, name:m.player_name, team:m.entry_name, total:m.total})),
+
+    get_gw_scores: ({gw}) =>
+      managers.map(m => ({name:m.player_name, pts:gwHistory[m.entry]?.[gw]||0, total:m.total}))
+              .sort((a,b) => b.pts-a.pts),
+
     get_range_scores: ({from_gw, to_gw}) => {
-      const range = Array.from({length:to_gw-from_gw+1},(_,i)=>from_gw+i).filter(g=>g>=1&&g<=currentGW);
-      return managers.map(m=>({
+      const range = Array.from({length:Math.min(to_gw,currentGW)-from_gw+1}, (_,i) => from_gw+i).filter(g=>g>=1);
+      return managers.map(m => ({
         name:m.player_name,
-        pts:range.reduce((s,gw)=>s+(gwHistory[m.entry]?.[gw]||0),0),
+        pts:range.reduce((s,gw) => s+(gwHistory[m.entry]?.[gw]||0), 0),
         total:m.total
-      })).sort((a,b)=>b.pts-a.pts);
+      })).sort((a,b) => b.pts-a.pts);
     },
-    get_gw_scores: ({gw}) => {
-      return managers.map(m=>({name:m.player_name,pts:gwHistory[m.entry]?.[gw]||0,total:m.total})).sort((a,b)=>b.pts-a.pts);
-    },
-    get_standings: () => managers.map((m,i)=>({rank:i+1,name:m.player_name,team:m.entry_name,total:m.total})),
+
     get_cumulative: ({manager_name, gw}) => {
-      const m = managers.find(x=>x.player_name.toLowerCase().includes(manager_name.toLowerCase()));
-      if(!m) return null;
+      const m = managers.find(x => x.player_name.toLowerCase().includes(manager_name.toLowerCase()));
+      if (!m) return {error:`Hittade inte ${manager_name}`};
       let cum=0;
-      return Array.from({length:gw},(_,i)=>i+1).map(g=>{cum+=gwHistory[m.entry]?.[g]||0; return {gw:g,cumulative:cum,gw_pts:gwHistory[m.entry]?.[g]||0};});
+      return Array.from({length:gw||currentGW}, (_,i) => i+1)
+        .map(g => { cum+=gwHistory[m.entry]?.[g]||0; return {gw:g, gw_pts:gwHistory[m.entry]?.[g]||0, cumulative:cum}; });
     },
+
     get_overtake_gw: ({manager1, manager2}) => {
       const m1=managers.find(x=>x.player_name.toLowerCase().includes(manager1.toLowerCase()));
       const m2=managers.find(x=>x.player_name.toLowerCase().includes(manager2.toLowerCase()));
-      if(!m1||!m2) return null;
-      let cum1=0,cum2=0,overtakes=[];
-      for(let gw=1;gw<=currentGW;gw++){
-        const prev1=cum1,prev2=cum2;
+      if (!m1||!m2) return {error:`Hittade inte ${manager1} eller ${manager2}`};
+      let cum1=0, cum2=0, overtakes=[];
+      for (let gw=1; gw<=currentGW; gw++) {
+        const prev1=cum1, prev2=cum2;
         cum1+=gwHistory[m1.entry]?.[gw]||0;
         cum2+=gwHistory[m2.entry]?.[gw]||0;
-        if(prev1<=prev2 && cum1>cum2) overtakes.push({gw,type:`${m1.player_name} gick om ${m2.player_name}`,gap:cum1-cum2});
-        if(prev2<=prev1 && cum2>cum1) overtakes.push({gw,type:`${m2.player_name} gick om ${m1.player_name}`,gap:cum2-cum1});
+        if (prev1<=prev2 && cum1>cum2) overtakes.push({gw, event:`${m1.player_name} gick om ${m2.player_name}`, gap:cum1-cum2});
+        if (prev2<=prev1 && cum2>cum1) overtakes.push({gw, event:`${m2.player_name} gick om ${m1.player_name}`, gap:cum2-cum1});
       }
       return overtakes;
+    },
+
+    get_consistency: () =>
+      managers.map(m => {
+        const scores = Array.from({length:currentGW}, (_,i) => i+1).map(gw => gwHistory[m.entry]?.[gw]||0);
+        const avg = scores.reduce((s,p)=>s+p,0)/scores.length;
+        const stddev = Math.sqrt(scores.reduce((s,p)=>s+Math.pow(p-avg,2),0)/scores.length);
+        return {name:m.player_name, avg:+avg.toFixed(1), stddev:+stddev.toFixed(1),
+          min:Math.min(...scores), max:Math.max(...scores), range:Math.max(...scores)-Math.min(...scores), total:m.total};
+      }).sort((a,b) => a.stddev-b.stddev),
+
+    get_decisive_gw: ({quarter}) => {
+      const [from_gw, to_gw] = QUARTERS[quarter] || [1, currentGW];
+      const range = Array.from({length:Math.min(to_gw,currentGW)-from_gw+1}, (_,i) => from_gw+i);
+      if (!range.length) return null;
+      const cums = Object.fromEntries(managers.map(m=>[m.entry,0]));
+      let prevLeader=null, changes=[], snapshots=[];
+      for (const gw of range) {
+        managers.forEach(m => { cums[m.entry]+=gwHistory[m.entry]?.[gw]||0; });
+        const sorted = [...managers].sort((a,b) => cums[b.entry]-cums[a.entry]);
+        const leader = sorted[0].player_name;
+        const gap = cums[sorted[0].entry]-cums[sorted[1].entry];
+        if (prevLeader && prevLeader!==leader) changes.push({gw, new_leader:leader, gap});
+        prevLeader=leader; snapshots.push({gw, leader, gap});
+      }
+      const winner = snapshots[snapshots.length-1].leader;
+      const winnerChanges = changes.filter(c=>c.new_leader===winner);
+      const decisive = winnerChanges.length>0 ? winnerChanges[winnerChanges.length-1]
+        : {gw:from_gw, new_leader:winner, note:`${winner} ledde från start`};
+      return {winner, decisive, all_leader_changes:changes,
+        final_gap:snapshots[snapshots.length-1].gap,
+        quarter_range:`GW${from_gw}–GW${Math.min(to_gw,currentGW)}`,
+        final_top3:[...managers].sort((a,b)=>cums[b.entry]-cums[a.entry]).slice(0,3).map(m=>({name:m.player_name,pts:cums[m.entry]}))};
     }
   };
 }
 
-function formatToolResult(name, result) {
-  if(!result) return "Hittade inte spelaren.";
-  if(name==="get_range_scores"||name==="get_gw_scores") {
-    return result.map((s,i)=>{
-      let label = '';
-      if(i===0) label = ' ← VINNARE';
-      else if(i===1) label = ` ← TVÅA (${result[0].pts-s.pts} pts bakom)`;
-      else if(i===2) label = ` ← TREA (${result[0].pts-s.pts} pts bakom)`;
-      return `${i+1}. ${s.name}: ${s.pts} pts${label}`;
-    }).join("\n");
-  }
-  if(name==="get_standings") {
-    return result.map(s=>`${s.rank}. ${s.name} (${s.team}): ${s.total} pts`).join("\n");
-  }
-  if(name==="get_cumulative") {
-    return result.map(r=>`GW${r.gw}: ${r.gw_pts} pts (ackumulerat: ${r.cumulative})`).join("\n");
-  }
-  if(name==="get_overtake_gw") {
-    if(result.length===0) return "Inga förbipasseringar hittades.";
-    return result.map(r=>`GW${r.gw}: ${r.type} (gap: ${r.gap} pts)`).join("\n");
-  }
-  return JSON.stringify(result);
+// ── GROQ FUNCTION CALLING ──
+
+function buildToolSchemas() {
+  return [
+    {type:"function",function:{name:"get_standings",description:"Hämtar aktuell ligatabell med ranking och totalpoäng för alla spelare",parameters:{type:"object",properties:{},required:[]}}},
+    {type:"function",function:{name:"get_gw_scores",description:"Hämtar poäng för alla spelare i en specifik omgång",parameters:{type:"object",properties:{gw:{type:"integer",description:"Omgångsnummer 1-38"}},required:["gw"]}}},
+    {type:"function",function:{name:"get_range_scores",description:"Sammanlagda poäng för alla spelare under ett godtyckligt GW-intervall. Använd för att jämföra perioder, halvtider eller egna intervall.",parameters:{type:"object",properties:{from_gw:{type:"integer",description:"Startomgång"},to_gw:{type:"integer",description:"Slutomgång"}},required:["from_gw","to_gw"]}}},
+    {type:"function",function:{name:"get_quarter_scores",description:"Poäng för ett helt kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38",parameters:{type:"object",properties:{quarter:{type:"integer",description:"Kvartalnummer 1-4"}},required:["quarter"]}}},
+    {type:"function",function:{name:"get_overtake_gw",description:"Visar alla tillfällen då två spelare passerade varandra i ackumulerad totalpoäng",parameters:{type:"object",properties:{manager1:{type:"string",description:"Spelarens förnamn eller hela namn"},manager2:{type:"string",description:"Spelarens förnamn eller hela namn"}},required:["manager1","manager2"]}}},
+    {type:"function",function:{name:"get_consistency",description:"Konsistensstatistik: standardavvikelse (stddev), snitt, min, max och range (max-min) per GW för varje spelare. Lägst stddev = mest konsekvent. Störst range = mest dramatisk säsong.",parameters:{type:"object",properties:{},required:[]}}},
+    {type:"function",function:{name:"get_decisive_gw",description:"Avgörande omgångar för ett kvartal: ledarbyten, vem vann och det avgörande momentet",parameters:{type:"object",properties:{quarter:{type:"integer",description:"Kvartalnummer 1-4"}},required:["quarter"]}}},
+    {type:"function",function:{name:"get_cumulative",description:"Ackumulerad poängutveckling GW för GW för en specifik spelare",parameters:{type:"object",properties:{manager_name:{type:"string",description:"Spelarens namn (delnamn ok)"},up_to_gw:{type:"integer",description:"Upp till denna omgång (default: nuvarande GW)"}},required:["manager_name"]}}}
+  ];
 }
 
-function buildContext() {
-  if(!dataLoaded) return 'Data ej laddad.';
-  const gws=Array.from({length:currentGW},(_,i)=>i+1);
-  let ctx=`FPL-liga, aktuell omgång: GW${currentGW}.\nKVARTAL: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38\n\nLIGATABELL:\n`;
-  managers.forEach((m,i)=>{ ctx+=`${i+1}. ${m.player_name} (${m.entry_name}): ${m.total} pts\n`; });
-  ctx+=`\nPOÄNG PER OMGÅNG:\n`;
-  managers.forEach(m=>{ ctx+=`${m.player_name}: `+gws.map(gw=>`GW${gw}=${gwHistory[m.entry]?.[gw]||0}`).join(', ')+'\n'; });
-  return ctx;
+function executeTool(name, args) {
+  const t = getTools();
+  switch(name) {
+    case 'get_standings':      return t.get_standings();
+    case 'get_gw_scores':      return t.get_gw_scores({gw:args.gw});
+    case 'get_range_scores':   return t.get_range_scores({from_gw:args.from_gw, to_gw:args.to_gw});
+    case 'get_quarter_scores': { const [f,to]=QUARTERS[args.quarter]||[1,currentGW]; return t.get_range_scores({from_gw:f,to_gw:to}); }
+    case 'get_overtake_gw':    return t.get_overtake_gw({manager1:args.manager1, manager2:args.manager2});
+    case 'get_consistency':    return t.get_consistency();
+    case 'get_decisive_gw':    return t.get_decisive_gw({quarter:args.quarter});
+    case 'get_cumulative':     return t.get_cumulative({manager_name:args.manager_name, gw:args.up_to_gw||currentGW});
+    default: return {error:`Unknown tool: ${name}`};
+  }
 }
+
+async function runFunctionCalling(question) {
+  const playerNames = managers.map(m=>m.player_name).join(', ');
+  const messages = [
+    {role:'system', content:`Du är en FPL-assistent som analyserar mini-ligan 'Big Blinds' (${managers.length} spelare, GW${currentGW}). Kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38.\nSpelare: ${playerNames}.\nSvara på svenska med emojis. Var kortfattad.\nKRITISK REGEL: Använd ALLTID verktygen för exakt data. Uppfinn ALDRIG siffror.`},
+    {role:'user', content:question}
+  ];
+  const tools = buildToolSchemas();
+  for (let i=0; i<6; i++) {
+    const res = await callGroq({messages, tools});
+    const choice = res.choice;
+    if (choice.finish_reason === 'tool_calls') {
+      messages.push(choice.message);
+      for (const tc of choice.message.tool_calls) {
+        const args = JSON.parse(tc.function.arguments);
+        const result = executeTool(tc.function.name, args);
+        messages.push({role:'tool', tool_call_id:tc.id, content:JSON.stringify(result)});
+      }
+    } else {
+      return choice.message.content;
+    }
+  }
+  return 'Kunde inte generera svar.';
+}
+
+async function callGroq(body) {
+  const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  return d;
+}
+
+// ── DEAD CODE REMOVED — old regex query engine replaced by function calling ──
+// jsAnswer() was here. Now Groq picks tools autonomously.
 
 async function sendMessage(text) {
-  const input=document.getElementById('chat-input');
-  const msg=text||input.value.trim();
-  if(!msg) return;
-  input.value='';
-  appendMsg(msg,'user');
-  document.getElementById('suggestions').style.display='none';
-  const typing=appendTyping();
-  document.getElementById('send-btn').disabled=true;
-
+  const input = document.getElementById('chat-input');
+  const msg = text || input.value.trim();
+  if (!msg || !dataLoaded) return;
+  input.value = '';
+  appendMsg(msg, 'user');
+  document.getElementById('suggestions').style.display = 'none';
+  const typing = appendTyping();
+  document.getElementById('send-btn').disabled = true;
   try {
-    // Step 1: Try JS engine first
-    const jsResult = jsAnswer(msg);
-
-    if(jsResult && jsResult.type === 'direct') {
-      // Pure JS answer, no Groq needed
-      setTimeout(()=>{ typing.remove(); appendMsg(jsResult.text,'ai'); document.getElementById('send-btn').disabled=false; }, 200);
-      return;
-    }
-
-    if(jsResult && jsResult.type === 'data') {
-      // JS has exact data — send to Groq ONLY for language polish
-      const dataStr = jsResult.parts.map(p => `=== ${p.label} ===\n${p.data}`).join('\n\n');
-      const res = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          system:`Du är en FPL-expert. Svara på svenska med emojis. Var kortfattad — bara svaret, ingen tankeprocess. Använd EXAKT och ENDAST de siffror som ges nedan, ändra eller räkna inte om dem.`,
-          message:`Fråga: "${msg}"\n\nExakt data:\n${dataStr}\n\nFormulera ett kort svar med dessa exakta siffror.`
-        })
-      });
-      const data = await res.json();
-      typing.remove();
-      appendMsg(data.reply || dataStr, 'ai');
-    } else {
-      // Insight question — Groq handles with full context, no numbers expected
-      const res = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          system:`Du är en FPL-expert som analyserar en privat mini-liga. Svara på svenska med emojis. Var kortfattad. Resonera om trender, form och strategi — men hitta INTE på siffror eller poäng.\n\n${buildContext()}`,
-          message: msg
-        })
-      });
-      const data = await res.json();
-      typing.remove();
-      appendMsg(data.reply || 'Kunde inte svara.', 'ai');
-    }
+    const answer = await runFunctionCalling(msg);
+    typing.remove();
+    appendMsg(answer, 'ai');
   } catch(e) {
     typing.remove();
     appendMsg('Fel vid anrop till servern.', 'ai');
+    console.error(e);
   }
-  document.getElementById('send-btn').disabled=false;
+  document.getElementById('send-btn').disabled = false;
 }
 
 function appendMsg(text,role) {
@@ -640,7 +595,13 @@ function toggleChat() {
   const fab = document.getElementById('chat-fab');
   const isOpen = sidebar.classList.contains('open');
   sidebar.classList.toggle('open', !isOpen);
-  fab.textContent = isOpen ? '⚡' : '✕';
+  fab.classList.toggle('hidden', !isOpen);
+  document.body.classList.toggle('chat-open', !isOpen);
+  if (!isOpen) {
+    const msgs = document.getElementById('chat-messages');
+    msgs.scrollTop = msgs.scrollHeight;
+    document.getElementById('chat-input').focus();
+  }
 }
 
 init();

@@ -49,23 +49,26 @@ async def chat(body: dict):
     if not api_key:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY saknas")
 
+    # Build Groq payload — supports both function calling (messages+tools) format
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": body.get("messages", []),
+        "max_tokens": body.get("max_tokens", 1000),
+    }
+    if "tools" in body:
+        payload["tools"] = body["tools"]
+        payload["tool_choice"] = "auto"
+
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [
-                    {"role": "system", "content": body.get("system", "Du är en FPL-expert. Svara på svenska.")},
-                    {"role": "user", "content": body.get("message", "")}
-                ],
-                "max_tokens": 500
-            }
+            json=payload
         )
         if r.status_code != 200:
             raise HTTPException(status_code=r.status_code, detail=f"Groq API error: {r.text}")
         data = r.json()
-        return {"reply": data["choices"][0]["message"]["content"]}
+        return {"choice": data["choices"][0]}
 
 @app.get("/")
 async def root():
