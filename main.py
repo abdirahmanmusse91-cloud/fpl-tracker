@@ -166,6 +166,85 @@ async def get_history(entry_id: int, background_tasks: BackgroundTasks):
     return data
 
 
+# ── Dashboard batch endpoint ──
+
+@app.get("/api/dashboard/{league_id}")
+async def dashboard(league_id: int, background_tasks: BackgroundTasks):
+    """
+    Returns everything the frontend needs in one response:
+    - managers (league standings from FPL)
+    - gw_history: all historical GWs from Supabase, current GW live from FPL
+    - current_gw
+    This avoids N separate entry/history calls from the frontend.
+    """
+    boot = await get_bootstrap()
+    all_finished, current_gw = get_finished_gws(boot)
+    historical_set = set(gw for gw in all_finished if gw < current_gw)
+
+    # League standings from FPL
+    async with httpx.AsyncClient(timeout=15) as c:
+        league_r = await c.get(
+            f"{FPL_BASE}/leagues-classic/{league_id}/standings/", headers=FPL_HEADERS
+        )
+        if league_r.status_code != 200:
+            raise HTTPException(status_code=league_r.status_code, detail="FPL API error")
+        managers = league_r.json()["standings"]["results"]
+
+    entry_ids = [m["entry"] for m in managers]
+    gw_history: dict[int, dict[int, int]] = {eid: {} for eid in entry_ids}
+
+    # ONE Supabase query for all managers' historical data
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(
+                f"{SUPABASE_URL}/rest/v1/gw_cache",
+                headers=SB_HEADERS,
+                params={
+                    "entry_id": f"in.({','.join(str(e) for e in entry_ids)})",
+                    "select": "entry_id,gw,points",
+                },
+            )
+        if r.status_code == 200:
+            for row in r.json():
+                gw_history[row["entry_id"]][row["gw"]] = row["points"]
+    except Exception:
+        pass
+
+    # Current GW: always fetch live from FPL (parallel for all managers)
+    # Also fills in any historical GWs missing from Supabase
+    to_cache_all: dict[int, dict[int, int]] = {}
+
+    async def fetch_entry(entry_id: int):
+        try:
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.get(f"{FPL_BASE}/entry/{entry_id}/history/", headers=FPL_HEADERS)
+                data = r.json()
+            missing_historical = {}
+            for gw in data.get("current", []):
+                pts = gw["points"] - (gw.get("event_transfers_cost") or 0)
+                if gw["event"] == current_gw:
+                    gw_history[entry_id][current_gw] = pts
+                elif gw["event"] in historical_set and gw["event"] not in gw_history[entry_id]:
+                    gw_history[entry_id][gw["event"]] = pts
+                    missing_historical[gw["event"]] = pts
+            if missing_historical:
+                to_cache_all[entry_id] = missing_historical
+        except Exception:
+            pass
+
+    await asyncio.gather(*[fetch_entry(eid) for eid in entry_ids])
+
+    # Cache any missing historical data in background
+    for eid, data in to_cache_all.items():
+        background_tasks.add_task(sb_write, eid, data)
+
+    return {
+        "managers": managers,
+        "gw_history": gw_history,
+        "current_gw": current_gw,
+    }
+
+
 # ── Sync endpoint (called by cron job) ──
 
 LEAGUE_ID = 1076120

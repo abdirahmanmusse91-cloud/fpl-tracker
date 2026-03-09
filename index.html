@@ -284,37 +284,64 @@ async function get(path) {
   return r.json();
 }
 
+const LS_KEY = 'fpl_big_blinds_v1';
+
+function showDashboard() {
+  selectedGW = currentGW;
+  dataLoaded = true;
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('dashboard').classList.remove('hidden');
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('gw-pill').textContent = `GW ${currentGW}`;
+  document.getElementById('gw-pill').classList.remove('hidden');
+  render();
+}
+
 async function init() {
+  // Try localStorage — valid if same currentGW as last fetch
   try {
-    const league = await get(`/api/league/${LEAGUE_ID}`);
-    managers = league.standings.results;
+    const cached = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+    if (cached) {
+      managers   = cached.managers;
+      gwHistory  = cached.gwHistory;
+      currentGW  = cached.currentGW;
+      showDashboard();
 
-    const boot = await get('/api/bootstrap');
-    const finished = boot.events.filter(e => e.finished);
-    currentGW = finished.length > 0 ? finished[finished.length-1].id : 1;
-    selectedGW = currentGW;
+      // Refresh silently in background if data is older than 5 min
+      if (Date.now() - cached.ts > 5 * 60 * 1000) {
+        refreshData(cached.currentGW);
+      }
+      return;
+    }
+  } catch {}
 
-    await Promise.all(managers.map(async m => {
-      try {
-        const hist = await get(`/api/entry/${m.entry}/history`);
-        gwHistory[m.entry] = {};
-        hist.current.forEach(gw => { gwHistory[m.entry][gw.event] = gw.points - (gw.event_transfers_cost||0); });
-      } catch { gwHistory[m.entry] = {}; }
-    }));
-
-    dataLoaded = true;
-    document.getElementById('loading').classList.add('hidden');
-    document.getElementById('dashboard').classList.remove('hidden');
-    document.getElementById('send-btn').disabled = false;
-    document.getElementById('gw-pill').textContent = `GW ${currentGW}`;
-    document.getElementById('gw-pill').classList.remove('hidden');
-    render();
+  // No cache — fetch fresh
+  try {
+    await refreshData(null);
   } catch(e) {
     document.getElementById('loading').classList.add('hidden');
     const eb = document.getElementById('error-box');
     eb.style.display = 'block';
     eb.innerHTML = `<strong>Kunde inte hämta data.</strong><br>${e.message}`;
   }
+}
+
+async function refreshData(knownGW) {
+  const data = await get(`/api/dashboard/${LEAGUE_ID}`);
+  managers   = data.managers;
+  currentGW  = data.current_gw;
+  // gw_history keys are integers from Python dict
+  gwHistory  = {};
+  for (const [eid, hist] of Object.entries(data.gw_history)) {
+    gwHistory[parseInt(eid)] = Object.fromEntries(
+      Object.entries(hist).map(([gw, pts]) => [parseInt(gw), pts])
+    );
+  }
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({ts: Date.now(), managers, gwHistory, currentGW}));
+  } catch {}
+  // Only re-render if GW changed (silent refresh) or first load
+  if (knownGW !== currentGW || !dataLoaded) showDashboard();
 }
 
 function render() {
@@ -616,7 +643,10 @@ async function runFunctionCalling(question) {
 
 async function callGroq(body) {
   const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  if (!r.ok) {
+    // Groq misslyckades med att generera ett tool-anrop — returnera ett vänligt svar
+    return {choice:{finish_reason:'stop', message:{role:'assistant', content:'Tyvärr kunde jag inte tolka den frågan. Försök omformulera den! 🙏'}}};
+  }
   const d = await r.json();
   if (d.error) throw new Error(d.error);
   return d;
