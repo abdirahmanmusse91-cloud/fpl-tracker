@@ -412,232 +412,79 @@ function renderBars(gw) {
     <div class="bar-total">${subVal(s)}</div></div>`).join('');
 }
 
-// ── TOOL IMPLEMENTATIONS (exact JS calculations, no Groq involvement) ──
+// ── CHAT — direct data context (no function calling) ──
 const QUARTERS = {1:[1,10], 2:[11,20], 3:[21,30], 4:[31,38]};
+let chatHistory = [];
 
-function getTools() {
-  return {
-    get_standings: () =>
-      managers.map((m,i) => ({rank:i+1, name:m.player_name, team:m.entry_name, total:m.total})),
+function buildSystemMessage() {
+  const order = managers.map(m => m.player_name);
 
-    get_gw_scores: ({gw}) =>
-      managers.map(m => ({name:m.player_name, pts:gwHistory[m.entry]?.[gw]||0, total:m.total}))
-              .sort((a,b) => b.pts-a.pts),
+  // Ligatabell
+  const standings = managers.map((m, i) =>
+    `${i+1}. ${m.player_name} (${m.entry_name}) — ${m.total}p`
+  ).join('\n');
 
-    get_range_scores: ({from_gw, to_gw}) => {
-      const range = Array.from({length:Math.min(to_gw,currentGW)-from_gw+1}, (_,i) => from_gw+i).filter(g=>g>=1);
-      return managers.map(m => ({
-        name:m.player_name,
-        pts:range.reduce((s,gw) => s+(gwHistory[m.entry]?.[gw]||0), 0),
-        total:m.total
-      })).sort((a,b) => b.pts-a.pts);
-    },
-
-    get_cumulative: ({manager_name, gw}) => {
-      const m = managers.find(x => x.player_name.toLowerCase().includes(manager_name.toLowerCase()));
-      if (!m) return {error:`Hittade inte ${manager_name}`};
-      let cum=0;
-      return Array.from({length:gw||currentGW}, (_,i) => i+1)
-        .map(g => { cum+=gwHistory[m.entry]?.[g]||0; return {gw:g, gw_pts:gwHistory[m.entry]?.[g]||0, cumulative:cum}; });
-    },
-
-    get_overtake_gw: ({manager1, manager2}) => {
-      const m1=managers.find(x=>x.player_name.toLowerCase().includes(manager1.toLowerCase()));
-      const m2=managers.find(x=>x.player_name.toLowerCase().includes(manager2.toLowerCase()));
-      if (!m1||!m2) return {error:`Hittade inte ${manager1} eller ${manager2}`};
-      let cum1=0, cum2=0, overtakes=[];
-      for (let gw=1; gw<=currentGW; gw++) {
-        const prev1=cum1, prev2=cum2;
-        cum1+=gwHistory[m1.entry]?.[gw]||0;
-        cum2+=gwHistory[m2.entry]?.[gw]||0;
-        if (prev1<=prev2 && cum1>cum2) overtakes.push({gw, event:`${m1.player_name} gick om ${m2.player_name}`, gap:cum1-cum2});
-        if (prev2<=prev1 && cum2>cum1) overtakes.push({gw, event:`${m2.player_name} gick om ${m1.player_name}`, gap:cum2-cum1});
-      }
-      return overtakes;
-    },
-
-    get_consistency: () =>
-      managers.map(m => {
-        const scores = Array.from({length:currentGW}, (_,i) => i+1).map(gw => gwHistory[m.entry]?.[gw]||0);
-        const avg = scores.reduce((s,p)=>s+p,0)/scores.length;
-        const stddev = Math.sqrt(scores.reduce((s,p)=>s+Math.pow(p-avg,2),0)/scores.length);
-        return {name:m.player_name, avg:+avg.toFixed(1), stddev:+stddev.toFixed(1),
-          min:Math.min(...scores), max:Math.max(...scores), range:Math.max(...scores)-Math.min(...scores), total:m.total};
-      }).sort((a,b) => a.stddev-b.stddev),
-
-    get_decisive_gw: ({quarter}) => {
-      const [from_gw, to_gw] = QUARTERS[quarter] || [1, currentGW];
-      const range = Array.from({length:Math.min(to_gw,currentGW)-from_gw+1}, (_,i) => from_gw+i);
-      if (!range.length) return null;
-      const cums = Object.fromEntries(managers.map(m=>[m.entry,0]));
-      let prevLeader=null, changes=[], snapshots=[];
-      for (const gw of range) {
-        managers.forEach(m => { cums[m.entry]+=gwHistory[m.entry]?.[gw]||0; });
-        const sorted = [...managers].sort((a,b) => cums[b.entry]-cums[a.entry]);
-        const leader = sorted[0].player_name;
-        const gap = cums[sorted[0].entry]-cums[sorted[1].entry];
-        if (prevLeader && prevLeader!==leader) changes.push({gw, new_leader:leader, gap});
-        prevLeader=leader; snapshots.push({gw, leader, gap});
-      }
-      const winner = snapshots[snapshots.length-1].leader;
-      const winnerChanges = changes.filter(c=>c.new_leader===winner);
-      const decisive = winnerChanges.length>0 ? winnerChanges[winnerChanges.length-1]
-        : {gw:from_gw, new_leader:winner, note:`${winner} ledde från start`};
-      return {winner, decisive, all_leader_changes:changes,
-        final_gap:snapshots[snapshots.length-1].gap,
-        quarter_range:`GW${from_gw}–GW${Math.min(to_gw,currentGW)}`,
-        final_top3:[...managers].sort((a,b)=>cums[b.entry]-cums[a.entry]).slice(0,3).map(m=>({name:m.player_name,pts:cums[m.entry]}))};
-    },
-
-    get_gw_wins: ({manager_name} = {}) => {
-      // Count how many GWs each manager had the highest score (ties count for all tied)
-      const wins = Object.fromEntries(managers.map(m => [m.player_name, 0]));
-      for (let gw = 1; gw <= currentGW; gw++) {
-        const scores = managers.map(m => gwHistory[m.entry]?.[gw] || 0);
-        const maxPts = Math.max(...scores);
-        if (maxPts === 0) continue;
-        managers.forEach((m, i) => { if (scores[i] === maxPts) wins[m.player_name]++; });
-      }
-      const result = Object.entries(wins)
-        .map(([name, count]) => ({name, wins: count}))
-        .sort((a, b) => b.wins - a.wins);
-      if (manager_name) {
-        const found = result.find(r => r.name.toLowerCase().includes(manager_name.toLowerCase()));
-        return found || {error: `Hittade inte ${manager_name}`};
-      }
-      return result;
-    },
-
-    get_standings_at_gw: ({gw}) => {
-      // League table based on cumulative points through specified GW
-      const capGW = Math.min(gw, currentGW);
-      const range = Array.from({length: capGW}, (_, i) => i + 1);
-      return managers.map(m => ({
-        name: m.player_name,
-        pts: range.reduce((s, g) => s + (gwHistory[m.entry]?.[g] || 0), 0)
-      })).sort((a, b) => b.pts - a.pts).map((m, i) => ({rank: i+1, ...m}));
-    },
-
-    get_all_time_best_gw: ({top_n} = {}) => {
-      const n = top_n || 5;
-      const records = [];
-      for (let gw = 1; gw <= currentGW; gw++) {
-        for (const m of managers) {
-          const pts = gwHistory[m.entry]?.[gw] || 0;
-          if (pts > 0) records.push({name: m.player_name, gw, pts});
-        }
-      }
-      return records.sort((a, b) => b.pts - a.pts).slice(0, n);
-    },
-
-    get_head_to_head: ({manager1, manager2}) => {
-      // How many GWs each manager beat the other
-      const m1 = managers.find(x => x.player_name.toLowerCase().includes(manager1.toLowerCase()));
-      const m2 = managers.find(x => x.player_name.toLowerCase().includes(manager2.toLowerCase()));
-      if (!m1 || !m2) return {error: `Hittade inte ${manager1} eller ${manager2}`};
-      let w1=0, w2=0, draws=0;
-      const details = [];
-      for (let gw = 1; gw <= currentGW; gw++) {
-        const p1 = gwHistory[m1.entry]?.[gw] || 0;
-        const p2 = gwHistory[m2.entry]?.[gw] || 0;
-        if (p1 > p2) { w1++; details.push({gw, winner: m1.player_name, margin: p1-p2}); }
-        else if (p2 > p1) { w2++; details.push({gw, winner: m2.player_name, margin: p2-p1}); }
-        else { draws++; details.push({gw, winner: 'Oavgjort', margin: 0}); }
-      }
-      return {
-        manager1: {name: m1.player_name, wins: w1},
-        manager2: {name: m2.player_name, wins: w2},
-        draws, total_gws: currentGW,
-        biggest_win_m1: details.filter(d=>d.winner===m1.player_name).sort((a,b)=>b.margin-a.margin)[0] || null,
-        biggest_win_m2: details.filter(d=>d.winner===m2.player_name).sort((a,b)=>b.margin-a.margin)[0] || null,
-      };
-    }
-  };
-}
-
-// ── GROQ FUNCTION CALLING ──
-
-function buildToolSchemas() {
-  const ap = false; // additionalProperties:false on all schemas
-  return [
-    {type:"function",function:{name:"get_standings",description:"Hämtar aktuell ligatabell med ranking och totalpoäng för alla spelare",parameters:{type:"object",properties:{},required:[],additionalProperties:ap}}},
-    {type:"function",function:{name:"get_gw_scores",description:"Hämtar poäng för alla spelare i en specifik omgång",parameters:{type:"object",properties:{gw:{type:"integer",description:"Omgångsnummer 1-38"}},required:["gw"],additionalProperties:ap}}},
-    {type:"function",function:{name:"get_range_scores",description:"Sammanlagda poäng för alla spelare under ett godtyckligt GW-intervall. Använd för att jämföra perioder, halvtider eller egna intervall.",parameters:{type:"object",properties:{from_gw:{type:"integer",description:"Startomgång"},to_gw:{type:"integer",description:"Slutomgång"}},required:["from_gw","to_gw"],additionalProperties:ap}}},
-    {type:"function",function:{name:"get_quarter_scores",description:"Poäng för ett helt kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38",parameters:{type:"object",properties:{quarter:{type:"integer",description:"Kvartalnummer 1-4"}},required:["quarter"],additionalProperties:ap}}},
-    {type:"function",function:{name:"get_overtake_gw",description:"Visar alla tillfällen då två spelare passerade varandra i ackumulerad totalpoäng",parameters:{type:"object",properties:{manager1:{type:"string",description:"Spelarens förnamn eller hela namn"},manager2:{type:"string",description:"Spelarens förnamn eller hela namn"}},required:["manager1","manager2"],additionalProperties:ap}}},
-    {type:"function",function:{name:"get_consistency",description:"Konsistensstatistik: standardavvikelse (stddev), snitt, min, max och range (max-min) per GW för varje spelare. Lägst stddev = mest konsekvent. Störst range = mest dramatisk säsong.",parameters:{type:"object",properties:{},required:[],additionalProperties:ap}}},
-    {type:"function",function:{name:"get_decisive_gw",description:"Avgörande omgångar för ett kvartal: ledarbyten, vem vann och det avgörande momentet",parameters:{type:"object",properties:{quarter:{type:"integer",description:"Kvartalnummer 1-4"}},required:["quarter"],additionalProperties:ap}}},
-    {type:"function",function:{name:"get_cumulative",description:"Ackumulerad poängutveckling GW för GW för en specifik spelare",parameters:{type:"object",properties:{manager_name:{type:"string",description:"Spelarens namn (delnamn ok)"},up_to_gw:{type:"integer",description:"Upp till denna omgång (default: nuvarande GW)"}},required:["manager_name"],additionalProperties:ap}}},
-    {type:"function",function:{name:"get_gw_wins",description:"Räknar hur många omgångar varje (eller en specifik) spelare hade högst poäng. Använd denna för frågor om 'vunnit flest omgångar', 'flest GW-vinster' etc.",parameters:{type:"object",properties:{manager_name:{type:"string",description:"Spelarens namn (delnamn ok) — utelämna för alla spelare"}},required:[],additionalProperties:ap}}},
-    {type:"function",function:{name:"get_standings_at_gw",description:"Ligatabellen (ackumulerad) vid en specifik omgång — t.ex. vem ledde efter GW15",parameters:{type:"object",properties:{gw:{type:"integer",description:"Omgångsnummer"}},required:["gw"],additionalProperties:ap}}},
-    {type:"function",function:{name:"get_head_to_head",description:"Head-to-head statistik mellan två spelare: hur många GWs vann vardera, oavgjort, och störst marginal",parameters:{type:"object",properties:{manager1:{type:"string",description:"Spelarens namn"},manager2:{type:"string",description:"Spelarens namn"}},required:["manager1","manager2"],additionalProperties:ap}}},
-    {type:"function",function:{name:"get_all_time_best_gw",description:"Hämtar topp-N bästa enskilda omgångsprestationerna under hela säsongen (alla spelare, alla GWs). Använd för 'bästa omgången', 'högsta poäng i en omgång', 'rekord' etc.",parameters:{type:"object",properties:{top_n:{type:"integer",description:"Antal topp-prestationer att returnera (default: 5)"}},required:[],additionalProperties:ap}}}
-  ];
-}
-
-function executeTool(name, args) {
-  const t = getTools();
-  switch(name) {
-    case 'get_standings':      return t.get_standings();
-    case 'get_gw_scores':      return t.get_gw_scores({gw:args.gw});
-    case 'get_range_scores':   return t.get_range_scores({from_gw:args.from_gw, to_gw:args.to_gw});
-    case 'get_quarter_scores': { const [f,to]=QUARTERS[args.quarter]||[1,currentGW]; return t.get_range_scores({from_gw:f,to_gw:to}); }
-    case 'get_overtake_gw':    return t.get_overtake_gw({manager1:args.manager1, manager2:args.manager2});
-    case 'get_consistency':    return t.get_consistency();
-    case 'get_decisive_gw':    return t.get_decisive_gw({quarter:args.quarter});
-    case 'get_cumulative':     return t.get_cumulative({manager_name:args.manager_name, gw:args.up_to_gw||currentGW});
-    case 'get_gw_wins':        return t.get_gw_wins(args.manager_name ? {manager_name:args.manager_name} : {});
-    case 'get_standings_at_gw':return t.get_standings_at_gw({gw:args.gw});
-    case 'get_head_to_head':      return t.get_head_to_head({manager1:args.manager1, manager2:args.manager2});
-    case 'get_all_time_best_gw':  return t.get_all_time_best_gw(args.top_n ? {top_n:args.top_n} : {});
-    default: return {error:`Unknown tool: ${name}`};
+  // GW-vinster (förberäknade)
+  const wins = Object.fromEntries(managers.map(m => [m.player_name, 0]));
+  for (let gw = 1; gw <= currentGW; gw++) {
+    const scores = managers.map(m => gwHistory[m.entry]?.[gw] || 0);
+    const max = Math.max(...scores);
+    if (max > 0) managers.forEach((m, i) => { if (scores[i] === max) wins[m.player_name]++; });
   }
-}
+  const winsStr = Object.entries(wins)
+    .sort((a, b) => b[1] - a[1])
+    .map(([n, w]) => `${n}: ${w}`)
+    .join(', ');
 
-async function runFunctionCalling(question) {
-  const playerNames = managers.map(m=>m.player_name).join(', ');
-  const messages = [
-    {role:'system', content:`Du är en FPL-assistent som analyserar mini-ligan 'Big Blinds' (${managers.length} spelare, GW${currentGW}). Kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38.\nSpelare: ${playerNames}.\nSvara på svenska med emojis. Var kortfattad men fullständig.\nKRITISK REGEL: Använd ALLTID verktygen för exakt data. Uppfinn ALDRIG siffror. Skicka ALDRIG extra parametrar till verktygen utöver de som finns i schemat.`},
-    {role:'user', content:question}
-  ];
-  const tools = buildToolSchemas();
-  for (let i=0; i<6; i++) {
-    const res = await callGroq({messages, tools});
-    const choice = res.choice;
-    if (choice.finish_reason === 'tool_calls') {
-      messages.push(choice.message);
-      for (const tc of choice.message.tool_calls) {
-        const args = JSON.parse(tc.function.arguments) || {};
-        const result = executeTool(tc.function.name, args);
-        messages.push({role:'tool', tool_call_id:tc.id, content:JSON.stringify(result)});
-      }
-    } else {
-      return choice.message.content;
-    }
+  // Konsistensstatistik
+  const consistency = managers.map(m => {
+    const scores = Array.from({length: currentGW}, (_, i) => gwHistory[m.entry]?.[i+1] || 0);
+    const avg = scores.reduce((s, p) => s + p, 0) / scores.length;
+    const stddev = Math.sqrt(scores.reduce((s, p) => s + Math.pow(p - avg, 2), 0) / scores.length);
+    return `${m.player_name}: snitt=${avg.toFixed(1)} stddev=${stddev.toFixed(1)} min=${Math.min(...scores)} max=${Math.max(...scores)}`;
+  }).join('\n');
+
+  // Alla GW-poäng som kompakt tabell
+  const gwLines = [];
+  for (let gw = 1; gw <= currentGW; gw++) {
+    const scores = managers.map(m => gwHistory[m.entry]?.[gw] || 0);
+    gwLines.push(`GW${String(gw).padStart(2,'0')}: ${scores.join(',')}`);
   }
-  return 'Jag förstår inte frågan, kan du omformulera den? 🙏';
+
+  return `Du är en FPL-assistent för mini-ligan "Big Blinds" (${managers.length} spelare, GW${currentGW}).
+Svara på svenska med emojis. Var kortfattad men fullständig.
+KRITISK REGEL: Använd ENBART nedanstående data — uppfinn ALDRIG siffror.
+Kvartal: K1=GW1-10, K2=GW11-20, K3=GW21-30, K4=GW31-38.
+
+─── LIGATABELL (efter GW${currentGW}) ───
+${standings}
+
+─── GW-VINSTER (antal omgångar med högst poäng) ───
+${winsStr}
+
+─── KONSISTENS ───
+${consistency}
+
+─── ALLA GW-POÄNG (spelare i ordning: ${order.join(', ')}) ───
+${gwLines.join('\n')}`;
 }
 
-async function callGroq(body) {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+async function callGroq(messages) {
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({messages, max_tokens: 600})
+    });
     if (r.ok) {
       const d = await r.json();
-      if (d.error) throw new Error(d.error);
-      return d;
+      return d.choice?.message?.content || null;
     }
-    // On first 400 (bad tool call generation), wait briefly and retry
-    if (attempt === 0 && r.status === 400) {
-      await new Promise(res => setTimeout(res, 800));
-      continue;
-    }
-    break;
+  } catch(e) {
+    console.error('Groq error:', e);
   }
-  return {choice:{finish_reason:'stop', message:{role:'assistant', content:'Jag förstår inte frågan, kan du omformulera den? 🙏'}}};
+  return null;
 }
-
-// ── DEAD CODE REMOVED — old regex query engine replaced by function calling ──
-// jsAnswer() was here. Now Groq picks tools autonomously.
 
 async function sendMessage(text) {
   const input = document.getElementById('chat-input');
@@ -648,11 +495,24 @@ async function sendMessage(text) {
   document.getElementById('suggestions').style.display = 'none';
   const typing = appendTyping();
   document.getElementById('send-btn').disabled = true;
+  chatHistory.push({role: 'user', content: msg});
   try {
-    const answer = await runFunctionCalling(msg);
-    typing.remove();
-    appendMsg(answer, 'ai');
+    const messages = [
+      {role: 'system', content: buildSystemMessage()},
+      ...chatHistory.slice(-10)
+    ];
+    const answer = await callGroq(messages);
+    if (answer) {
+      chatHistory.push({role: 'assistant', content: answer});
+      typing.remove();
+      appendMsg(answer, 'ai');
+    } else {
+      chatHistory.pop();
+      typing.remove();
+      appendMsg('Jag förstår inte frågan, kan du omformulera den? 🙏', 'ai');
+    }
   } catch(e) {
+    chatHistory.pop();
     typing.remove();
     appendMsg('Fel vid anrop till servern.', 'ai');
     console.error(e);
