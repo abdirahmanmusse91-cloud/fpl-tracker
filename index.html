@@ -480,8 +480,11 @@ async function callGroq(messages) {
       const d = await r.json();
       return d.choice?.message?.content || null;
     }
+    // Log non-200 so we can diagnose in browser DevTools → Console
+    const errText = await r.text().catch(() => '(no body)');
+    console.error(`[Groq] HTTP ${r.status}:`, errText);
   } catch(e) {
-    console.error('Groq error:', e);
+    console.error('[Groq] fetch exception:', e);
   }
   return null;
 }
