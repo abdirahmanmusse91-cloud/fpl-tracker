@@ -7,3 +7,19 @@ services:
     envVars:
       - key: GROQ_API_KEY
         sync: false
+      - key: SUPABASE_URL
+        value: https://gduuhbvkyjcesahmooon.supabase.co
+      - key: SUPABASE_KEY
+        sync: false
+
+  - type: cron
+    name: fpl-daily-sync
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python sync.py
+    schedule: "0 9 * * *"
+    envVars:
+      - key: SUPABASE_URL
+        value: https://gduuhbvkyjcesahmooon.supabase.co
+      - key: SUPABASE_KEY
+        sync: false

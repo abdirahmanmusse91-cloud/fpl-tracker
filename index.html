@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FPL Liga Tracker</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -116,8 +115,6 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .gwb:hover { color:var(--text); }
 .gwb.active { background:var(--g); color:#000; font-weight:600; }
 
-.chart-wrap { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:18px; margin-bottom:24px; }
-.chart-title { font-family:'Bebas Neue',sans-serif; font-size:0.95rem; letter-spacing:2px; margin-bottom:14px; }
 
 /* SIDEBAR */
 .sidebar { display:flex; flex-direction:column; height:calc(100vh - 60px); position:sticky; top:60px; background:var(--dark); }
@@ -233,6 +230,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
             <div class="bar-toggle">
               <button class="bar-toggle-btn active" id="toggle-gw" onclick="setBarMode('gw')">GW</button>
               <button class="bar-toggle-btn" id="toggle-total" onclick="setBarMode('total')">TOTAL</button>
+              <button class="bar-toggle-btn" id="toggle-quarter" onclick="setBarMode('quarter')">KVARTAL</button>
             </div>
             <div class="table-tag" id="gw-selected-label">GW —</div>
           </div>
@@ -240,11 +238,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
         <div class="gw-bars" id="gw-bars"></div>
         <div class="gw-nav" id="gw-nav"></div>
       </div>
-      <div class="sec">Ackumulerat</div>
-      <div class="chart-wrap">
-        <div class="chart-title">Total poängutveckling</div>
-        <canvas id="cum-chart" height="160"></canvas>
-      </div>
+
     </div>
   </main>
 
@@ -262,10 +256,10 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
         <div class="msg-time">Nu</div>
       </div>
       <div class="suggestions" id="suggestions">
-        <button class="suggest-btn" onclick="askSuggestion(this)">Vem hade högst poäng senaste omgången?</button>
-        <button class="suggest-btn" onclick="askSuggestion(this)">Visa topp 3 sammanlagt</button>
-        <button class="suggest-btn" onclick="askSuggestion(this)">Vem har förbättrat sig mest de senaste 3 GW?</button>
-        <button class="suggest-btn" onclick="askSuggestion(this)">Hur stor är skillnaden mellan 1:a och sista?</button>
+        <button class="suggest-btn" onclick="askSuggestion(this)">Vem har vunnit flest omgångar?</button>
+        <button class="suggest-btn" onclick="askSuggestion(this)">Vem är i bäst form de senaste 5 omgångarna?</button>
+        <button class="suggest-btn" onclick="askSuggestion(this)">Vem vann kvartal 1 och hur stor var skillnaden?</button>
+        <button class="suggest-btn" onclick="askSuggestion(this)">Vem har varit mest konsekvent under säsongen?</button>
       </div>
     </div>
     <div class="chat-input-wrap">
@@ -282,8 +276,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 const LEAGUE_ID = 1076120;
 const BASE = ''; // same origin
 
-let managers = [], gwHistory = {}, currentGW = 1, selectedGW = 1, cumChart = null, dataLoaded = false;
-const COLORS = ['#00ff87','#38bdf8','#fb923c','#f472b6','#a78bfa','#fbbf24','#34d399','#f87171','#60a5fa','#a3e635','#e879f9','#4ade80','#c084fc','#facc15','#67e8f9'];
+let managers = [], gwHistory = {}, currentGW = 1, selectedGW = 1, dataLoaded = false;
 
 async function get(path) {
   const r = await fetch(BASE + path);
@@ -354,7 +347,6 @@ function render() {
   for(let gw=1;gw<=currentGW;gw++) html+=`<button class="gwb ${gw===currentGW?'active':''}" onclick="renderBars(${gw})">GW${gw}</button>`;
   document.getElementById('gw-nav').innerHTML=html;
   renderBars(currentGW);
-  renderCumChart();
 }
 
 let barMode = 'gw';
@@ -363,45 +355,58 @@ function setBarMode(mode) {
   barMode = mode;
   document.getElementById('toggle-gw').classList.toggle('active', mode==='gw');
   document.getElementById('toggle-total').classList.toggle('active', mode==='total');
+  document.getElementById('toggle-quarter').classList.toggle('active', mode==='quarter');
   renderBars(selectedGW);
 }
 
+function getQuarterForGW(gw) {
+  for (const [n, [from, to]] of Object.entries(QUARTERS)) {
+    if (gw >= from && gw <= to) return {num: parseInt(n), from, to};
+  }
+  return null;
+}
+
 function renderBars(gw) {
-  selectedGW=gw;
-  document.getElementById('gw-selected-label').textContent=`GW ${gw}`;
-  document.querySelectorAll('.gwb').forEach(b=>b.classList.toggle('active',b.textContent===`GW${gw}`));
-  const data=managers.map(m=>({
-    name:m.player_name,
-    gw_pts:gwHistory[m.entry]?.[gw]||0,
-    total:Array.from({length:gw},(_,i)=>i+1).reduce((s,g)=>s+(gwHistory[m.entry]?.[g]||0),0)
+  selectedGW = gw;
+  document.querySelectorAll('.gwb').forEach(b => b.classList.toggle('active', b.textContent===`GW${gw}`));
+
+  if (barMode === 'quarter') {
+    const q = getQuarterForGW(gw);
+    if (q) {
+      const qRange = Array.from({length: gw - q.from + 1}, (_, i) => q.from + i);
+      const data = managers.map(m => ({
+        name: m.player_name,
+        q_pts: qRange.reduce((s, g) => s + (gwHistory[m.entry]?.[g] || 0), 0),
+        gw_pts: gwHistory[m.entry]?.[gw] || 0,
+      })).sort((a, b) => b.q_pts - a.q_pts);
+      const max = Math.max(...data.map(d => d.q_pts), 1);
+      document.getElementById('gw-selected-label').textContent = `K${q.num} GW${q.from}–${gw}`;
+      document.getElementById('gw-bars').innerHTML = data.map((s, i) => `
+        <div class="bar-row"><div class="bar-name" title="${s.name}">${s.name}</div>
+        <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s.q_pts/max*100).toFixed(1)}%"></div></div>
+        <div class="bar-pts">${s.q_pts}</div>
+        <div class="bar-total">${s.gw_pts} gw</div></div>`).join('');
+    }
+    return;
+  }
+
+  document.getElementById('gw-selected-label').textContent = `GW ${gw}`;
+  const data = managers.map(m => ({
+    name: m.player_name,
+    gw_pts: gwHistory[m.entry]?.[gw] || 0,
+    total: Array.from({length:gw}, (_, i) => i+1).reduce((s, g) => s + (gwHistory[m.entry]?.[g] || 0), 0)
   }));
-  const sorted = barMode==='total'
-    ? [...data].sort((a,b)=>b.total-a.total)
-    : [...data].sort((a,b)=>b.gw_pts-a.gw_pts);
-  const mainVal = s => barMode==='total' ? s.total : s.gw_pts;
-  const subVal  = s => barMode==='total' ? `${s.gw_pts} gw` : `${s.total} tot`;
-  const max=Math.max(...sorted.map(s=>mainVal(s)),1);
-  document.getElementById('gw-bars').innerHTML=sorted.map((s,i)=>`
+  const sorted = barMode === 'total'
+    ? [...data].sort((a, b) => b.total - a.total)
+    : [...data].sort((a, b) => b.gw_pts - a.gw_pts);
+  const mainVal = s => barMode === 'total' ? s.total : s.gw_pts;
+  const subVal  = s => barMode === 'total' ? `${s.gw_pts} gw` : `${s.total} tot`;
+  const max = Math.max(...sorted.map(s => mainVal(s)), 1);
+  document.getElementById('gw-bars').innerHTML = sorted.map((s, i) => `
     <div class="bar-row"><div class="bar-name" title="${s.name}">${s.name}</div>
     <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(mainVal(s)/max*100).toFixed(1)}%"></div></div>
     <div class="bar-pts">${mainVal(s)}</div>
     <div class="bar-total">${subVal(s)}</div></div>`).join('');
-}
-
-function renderCumChart() {
-  const gws=Array.from({length:currentGW},(_,i)=>i+1);
-  const datasets=managers.map((m,i)=>{
-    let cum=0;
-    return { label:m.player_name, data:gws.map(gw=>{cum+=gwHistory[m.entry]?.[gw]||0;return cum;}),
-      borderColor:COLORS[i%COLORS.length], backgroundColor:'transparent', borderWidth:2, pointRadius:2, pointHoverRadius:5, tension:0.3 };
-  });
-  if(cumChart) cumChart.destroy();
-  cumChart=new Chart(document.getElementById('cum-chart'),{
-    type:'line', data:{labels:gws.map(g=>`GW${g}`),datasets},
-    options:{responsive:true,plugins:{legend:{labels:{color:'#8a9e8a',font:{size:10},boxWidth:12,padding:10}},
-      tooltip:{backgroundColor:'#111311',borderColor:'#252a25',borderWidth:1,titleColor:'#00ff87',bodyColor:'#dceadc'}},
-      scales:{x:{ticks:{color:'#5a685a',font:{size:10}},grid:{color:'#1e221e'}},y:{ticks:{color:'#5a685a',font:{size:10}},grid:{color:'#1e221e'}}}}
-  });
 }
 
 // ── TOOL IMPLEMENTATIONS (exact JS calculations, no Groq involvement) ──
@@ -479,6 +484,70 @@ function getTools() {
         final_gap:snapshots[snapshots.length-1].gap,
         quarter_range:`GW${from_gw}–GW${Math.min(to_gw,currentGW)}`,
         final_top3:[...managers].sort((a,b)=>cums[b.entry]-cums[a.entry]).slice(0,3).map(m=>({name:m.player_name,pts:cums[m.entry]}))};
+    },
+
+    get_gw_wins: ({manager_name} = {}) => {
+      // Count how many GWs each manager had the highest score (ties count for all tied)
+      const wins = Object.fromEntries(managers.map(m => [m.player_name, 0]));
+      for (let gw = 1; gw <= currentGW; gw++) {
+        const scores = managers.map(m => gwHistory[m.entry]?.[gw] || 0);
+        const maxPts = Math.max(...scores);
+        if (maxPts === 0) continue;
+        managers.forEach((m, i) => { if (scores[i] === maxPts) wins[m.player_name]++; });
+      }
+      const result = Object.entries(wins)
+        .map(([name, count]) => ({name, wins: count}))
+        .sort((a, b) => b.wins - a.wins);
+      if (manager_name) {
+        const found = result.find(r => r.name.toLowerCase().includes(manager_name.toLowerCase()));
+        return found || {error: `Hittade inte ${manager_name}`};
+      }
+      return result;
+    },
+
+    get_standings_at_gw: ({gw}) => {
+      // League table based on cumulative points through specified GW
+      const capGW = Math.min(gw, currentGW);
+      const range = Array.from({length: capGW}, (_, i) => i + 1);
+      return managers.map(m => ({
+        name: m.player_name,
+        pts: range.reduce((s, g) => s + (gwHistory[m.entry]?.[g] || 0), 0)
+      })).sort((a, b) => b.pts - a.pts).map((m, i) => ({rank: i+1, ...m}));
+    },
+
+    get_all_time_best_gw: ({top_n} = {}) => {
+      const n = top_n || 5;
+      const records = [];
+      for (let gw = 1; gw <= currentGW; gw++) {
+        for (const m of managers) {
+          const pts = gwHistory[m.entry]?.[gw] || 0;
+          if (pts > 0) records.push({name: m.player_name, gw, pts});
+        }
+      }
+      return records.sort((a, b) => b.pts - a.pts).slice(0, n);
+    },
+
+    get_head_to_head: ({manager1, manager2}) => {
+      // How many GWs each manager beat the other
+      const m1 = managers.find(x => x.player_name.toLowerCase().includes(manager1.toLowerCase()));
+      const m2 = managers.find(x => x.player_name.toLowerCase().includes(manager2.toLowerCase()));
+      if (!m1 || !m2) return {error: `Hittade inte ${manager1} eller ${manager2}`};
+      let w1=0, w2=0, draws=0;
+      const details = [];
+      for (let gw = 1; gw <= currentGW; gw++) {
+        const p1 = gwHistory[m1.entry]?.[gw] || 0;
+        const p2 = gwHistory[m2.entry]?.[gw] || 0;
+        if (p1 > p2) { w1++; details.push({gw, winner: m1.player_name, margin: p1-p2}); }
+        else if (p2 > p1) { w2++; details.push({gw, winner: m2.player_name, margin: p2-p1}); }
+        else { draws++; details.push({gw, winner: 'Oavgjort', margin: 0}); }
+      }
+      return {
+        manager1: {name: m1.player_name, wins: w1},
+        manager2: {name: m2.player_name, wins: w2},
+        draws, total_gws: currentGW,
+        biggest_win_m1: details.filter(d=>d.winner===m1.player_name).sort((a,b)=>b.margin-a.margin)[0] || null,
+        biggest_win_m2: details.filter(d=>d.winner===m2.player_name).sort((a,b)=>b.margin-a.margin)[0] || null,
+      };
     }
   };
 }
@@ -494,7 +563,11 @@ function buildToolSchemas() {
     {type:"function",function:{name:"get_overtake_gw",description:"Visar alla tillfällen då två spelare passerade varandra i ackumulerad totalpoäng",parameters:{type:"object",properties:{manager1:{type:"string",description:"Spelarens förnamn eller hela namn"},manager2:{type:"string",description:"Spelarens förnamn eller hela namn"}},required:["manager1","manager2"]}}},
     {type:"function",function:{name:"get_consistency",description:"Konsistensstatistik: standardavvikelse (stddev), snitt, min, max och range (max-min) per GW för varje spelare. Lägst stddev = mest konsekvent. Störst range = mest dramatisk säsong.",parameters:{type:"object",properties:{},required:[]}}},
     {type:"function",function:{name:"get_decisive_gw",description:"Avgörande omgångar för ett kvartal: ledarbyten, vem vann och det avgörande momentet",parameters:{type:"object",properties:{quarter:{type:"integer",description:"Kvartalnummer 1-4"}},required:["quarter"]}}},
-    {type:"function",function:{name:"get_cumulative",description:"Ackumulerad poängutveckling GW för GW för en specifik spelare",parameters:{type:"object",properties:{manager_name:{type:"string",description:"Spelarens namn (delnamn ok)"},up_to_gw:{type:"integer",description:"Upp till denna omgång (default: nuvarande GW)"}},required:["manager_name"]}}}
+    {type:"function",function:{name:"get_cumulative",description:"Ackumulerad poängutveckling GW för GW för en specifik spelare",parameters:{type:"object",properties:{manager_name:{type:"string",description:"Spelarens namn (delnamn ok)"},up_to_gw:{type:"integer",description:"Upp till denna omgång (default: nuvarande GW)"}},required:["manager_name"]}}},
+    {type:"function",function:{name:"get_gw_wins",description:"Räknar hur många omgångar varje (eller en specifik) spelare hade högst poäng. Använd denna för frågor om 'vunnit flest omgångar', 'flest GW-vinster' etc.",parameters:{type:"object",properties:{manager_name:{type:"string",description:"Spelarens namn (delnamn ok) — utelämna för alla spelare"}},required:[]}}},
+    {type:"function",function:{name:"get_standings_at_gw",description:"Ligatabellen (ackumulerad) vid en specifik omgång — t.ex. vem ledde efter GW15",parameters:{type:"object",properties:{gw:{type:"integer",description:"Omgångsnummer"}},required:["gw"]}}},
+    {type:"function",function:{name:"get_head_to_head",description:"Head-to-head statistik mellan två spelare: hur många GWs vann vardera, oavgjort, och störst marginal",parameters:{type:"object",properties:{manager1:{type:"string",description:"Spelarens namn"},manager2:{type:"string",description:"Spelarens namn"}},required:["manager1","manager2"]}}},
+    {type:"function",function:{name:"get_all_time_best_gw",description:"Hämtar topp-N bästa enskilda omgångsprestationerna under hela säsongen (alla spelare, alla GWs). Använd för 'bästa omgången', 'högsta poäng i en omgång', 'rekord' etc.",parameters:{type:"object",properties:{top_n:{type:"integer",description:"Antal topp-prestationer att returnera (default: 5)"}},required:[]}}}
   ];
 }
 
@@ -509,6 +582,10 @@ function executeTool(name, args) {
     case 'get_consistency':    return t.get_consistency();
     case 'get_decisive_gw':    return t.get_decisive_gw({quarter:args.quarter});
     case 'get_cumulative':     return t.get_cumulative({manager_name:args.manager_name, gw:args.up_to_gw||currentGW});
+    case 'get_gw_wins':        return t.get_gw_wins(args.manager_name ? {manager_name:args.manager_name} : {});
+    case 'get_standings_at_gw':return t.get_standings_at_gw({gw:args.gw});
+    case 'get_head_to_head':      return t.get_head_to_head({manager1:args.manager1, manager2:args.manager2});
+    case 'get_all_time_best_gw':  return t.get_all_time_best_gw(args.top_n ? {top_n:args.top_n} : {});
     default: return {error:`Unknown tool: ${name}`};
   }
 }
@@ -516,7 +593,7 @@ function executeTool(name, args) {
 async function runFunctionCalling(question) {
   const playerNames = managers.map(m=>m.player_name).join(', ');
   const messages = [
-    {role:'system', content:`Du är en FPL-assistent som analyserar mini-ligan 'Big Blinds' (${managers.length} spelare, GW${currentGW}). Kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38.\nSpelare: ${playerNames}.\nSvara på svenska med emojis. Var kortfattad.\nKRITISK REGEL: Använd ALLTID verktygen för exakt data. Uppfinn ALDRIG siffror.`},
+    {role:'system', content:`Du är en FPL-assistent som analyserar mini-ligan 'Big Blinds' (${managers.length} spelare, GW${currentGW}). Kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38.\nSpelare: ${playerNames}.\nSvara på svenska med emojis. Var kortfattad.\nKRITISK REGEL: Använd ALLTID verktygen för exakt data. Uppfinn ALDRIG siffror.\nOm frågan gäller ALLA spelare — lista ALLA ${managers.length} spelare, ingen undantagen.`},
     {role:'user', content:question}
   ];
   const tools = buildToolSchemas();
@@ -526,7 +603,7 @@ async function runFunctionCalling(question) {
     if (choice.finish_reason === 'tool_calls') {
       messages.push(choice.message);
       for (const tc of choice.message.tool_calls) {
-        const args = JSON.parse(tc.function.arguments);
+        const args = JSON.parse(tc.function.arguments) || {};
         const result = executeTool(tc.function.name, args);
         messages.push({role:'tool', tool_call_id:tc.id, content:JSON.stringify(result)});
       }
