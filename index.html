@@ -558,19 +558,20 @@ function getTools() {
 // ── GROQ FUNCTION CALLING ──
 
 function buildToolSchemas() {
+  const ap = false; // additionalProperties:false on all schemas
   return [
-    {type:"function",function:{name:"get_standings",description:"Hämtar aktuell ligatabell med ranking och totalpoäng för alla spelare",parameters:{type:"object",properties:{},required:[]}}},
-    {type:"function",function:{name:"get_gw_scores",description:"Hämtar poäng för alla spelare i en specifik omgång",parameters:{type:"object",properties:{gw:{type:"integer",description:"Omgångsnummer 1-38"}},required:["gw"]}}},
-    {type:"function",function:{name:"get_range_scores",description:"Sammanlagda poäng för alla spelare under ett godtyckligt GW-intervall. Använd för att jämföra perioder, halvtider eller egna intervall.",parameters:{type:"object",properties:{from_gw:{type:"integer",description:"Startomgång"},to_gw:{type:"integer",description:"Slutomgång"}},required:["from_gw","to_gw"]}}},
-    {type:"function",function:{name:"get_quarter_scores",description:"Poäng för ett helt kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38",parameters:{type:"object",properties:{quarter:{type:"integer",description:"Kvartalnummer 1-4"}},required:["quarter"]}}},
-    {type:"function",function:{name:"get_overtake_gw",description:"Visar alla tillfällen då två spelare passerade varandra i ackumulerad totalpoäng",parameters:{type:"object",properties:{manager1:{type:"string",description:"Spelarens förnamn eller hela namn"},manager2:{type:"string",description:"Spelarens förnamn eller hela namn"}},required:["manager1","manager2"]}}},
-    {type:"function",function:{name:"get_consistency",description:"Konsistensstatistik: standardavvikelse (stddev), snitt, min, max och range (max-min) per GW för varje spelare. Lägst stddev = mest konsekvent. Störst range = mest dramatisk säsong.",parameters:{type:"object",properties:{},required:[]}}},
-    {type:"function",function:{name:"get_decisive_gw",description:"Avgörande omgångar för ett kvartal: ledarbyten, vem vann och det avgörande momentet",parameters:{type:"object",properties:{quarter:{type:"integer",description:"Kvartalnummer 1-4"}},required:["quarter"]}}},
-    {type:"function",function:{name:"get_cumulative",description:"Ackumulerad poängutveckling GW för GW för en specifik spelare",parameters:{type:"object",properties:{manager_name:{type:"string",description:"Spelarens namn (delnamn ok)"},up_to_gw:{type:"integer",description:"Upp till denna omgång (default: nuvarande GW)"}},required:["manager_name"]}}},
-    {type:"function",function:{name:"get_gw_wins",description:"Räknar hur många omgångar varje (eller en specifik) spelare hade högst poäng. Använd denna för frågor om 'vunnit flest omgångar', 'flest GW-vinster' etc.",parameters:{type:"object",properties:{manager_name:{type:"string",description:"Spelarens namn (delnamn ok) — utelämna för alla spelare"}},required:[]}}},
-    {type:"function",function:{name:"get_standings_at_gw",description:"Ligatabellen (ackumulerad) vid en specifik omgång — t.ex. vem ledde efter GW15",parameters:{type:"object",properties:{gw:{type:"integer",description:"Omgångsnummer"}},required:["gw"]}}},
-    {type:"function",function:{name:"get_head_to_head",description:"Head-to-head statistik mellan två spelare: hur många GWs vann vardera, oavgjort, och störst marginal",parameters:{type:"object",properties:{manager1:{type:"string",description:"Spelarens namn"},manager2:{type:"string",description:"Spelarens namn"}},required:["manager1","manager2"]}}},
-    {type:"function",function:{name:"get_all_time_best_gw",description:"Hämtar topp-N bästa enskilda omgångsprestationerna under hela säsongen (alla spelare, alla GWs). Använd för 'bästa omgången', 'högsta poäng i en omgång', 'rekord' etc.",parameters:{type:"object",properties:{top_n:{type:"integer",description:"Antal topp-prestationer att returnera (default: 5)"}},required:[]}}}
+    {type:"function",function:{name:"get_standings",description:"Hämtar aktuell ligatabell med ranking och totalpoäng för alla spelare",parameters:{type:"object",properties:{},required:[],additionalProperties:ap}}},
+    {type:"function",function:{name:"get_gw_scores",description:"Hämtar poäng för alla spelare i en specifik omgång",parameters:{type:"object",properties:{gw:{type:"integer",description:"Omgångsnummer 1-38"}},required:["gw"],additionalProperties:ap}}},
+    {type:"function",function:{name:"get_range_scores",description:"Sammanlagda poäng för alla spelare under ett godtyckligt GW-intervall. Använd för att jämföra perioder, halvtider eller egna intervall.",parameters:{type:"object",properties:{from_gw:{type:"integer",description:"Startomgång"},to_gw:{type:"integer",description:"Slutomgång"}},required:["from_gw","to_gw"],additionalProperties:ap}}},
+    {type:"function",function:{name:"get_quarter_scores",description:"Poäng för ett helt kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38",parameters:{type:"object",properties:{quarter:{type:"integer",description:"Kvartalnummer 1-4"}},required:["quarter"],additionalProperties:ap}}},
+    {type:"function",function:{name:"get_overtake_gw",description:"Visar alla tillfällen då två spelare passerade varandra i ackumulerad totalpoäng",parameters:{type:"object",properties:{manager1:{type:"string",description:"Spelarens förnamn eller hela namn"},manager2:{type:"string",description:"Spelarens förnamn eller hela namn"}},required:["manager1","manager2"],additionalProperties:ap}}},
+    {type:"function",function:{name:"get_consistency",description:"Konsistensstatistik: standardavvikelse (stddev), snitt, min, max och range (max-min) per GW för varje spelare. Lägst stddev = mest konsekvent. Störst range = mest dramatisk säsong.",parameters:{type:"object",properties:{},required:[],additionalProperties:ap}}},
+    {type:"function",function:{name:"get_decisive_gw",description:"Avgörande omgångar för ett kvartal: ledarbyten, vem vann och det avgörande momentet",parameters:{type:"object",properties:{quarter:{type:"integer",description:"Kvartalnummer 1-4"}},required:["quarter"],additionalProperties:ap}}},
+    {type:"function",function:{name:"get_cumulative",description:"Ackumulerad poängutveckling GW för GW för en specifik spelare",parameters:{type:"object",properties:{manager_name:{type:"string",description:"Spelarens namn (delnamn ok)"},up_to_gw:{type:"integer",description:"Upp till denna omgång (default: nuvarande GW)"}},required:["manager_name"],additionalProperties:ap}}},
+    {type:"function",function:{name:"get_gw_wins",description:"Räknar hur många omgångar varje (eller en specifik) spelare hade högst poäng. Använd denna för frågor om 'vunnit flest omgångar', 'flest GW-vinster' etc.",parameters:{type:"object",properties:{manager_name:{type:"string",description:"Spelarens namn (delnamn ok) — utelämna för alla spelare"}},required:[],additionalProperties:ap}}},
+    {type:"function",function:{name:"get_standings_at_gw",description:"Ligatabellen (ackumulerad) vid en specifik omgång — t.ex. vem ledde efter GW15",parameters:{type:"object",properties:{gw:{type:"integer",description:"Omgångsnummer"}},required:["gw"],additionalProperties:ap}}},
+    {type:"function",function:{name:"get_head_to_head",description:"Head-to-head statistik mellan två spelare: hur många GWs vann vardera, oavgjort, och störst marginal",parameters:{type:"object",properties:{manager1:{type:"string",description:"Spelarens namn"},manager2:{type:"string",description:"Spelarens namn"}},required:["manager1","manager2"],additionalProperties:ap}}},
+    {type:"function",function:{name:"get_all_time_best_gw",description:"Hämtar topp-N bästa enskilda omgångsprestationerna under hela säsongen (alla spelare, alla GWs). Använd för 'bästa omgången', 'högsta poäng i en omgång', 'rekord' etc.",parameters:{type:"object",properties:{top_n:{type:"integer",description:"Antal topp-prestationer att returnera (default: 5)"}},required:[],additionalProperties:ap}}}
   ];
 }
 
@@ -596,7 +597,7 @@ function executeTool(name, args) {
 async function runFunctionCalling(question) {
   const playerNames = managers.map(m=>m.player_name).join(', ');
   const messages = [
-    {role:'system', content:`Du är en FPL-assistent som analyserar mini-ligan 'Big Blinds' (${managers.length} spelare, GW${currentGW}). Kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38.\nSpelare: ${playerNames}.\nSvara på svenska med emojis. Var kortfattad.\nKRITISK REGEL: Använd ALLTID verktygen för exakt data. Uppfinn ALDRIG siffror.\nOm frågan gäller ALLA spelare — lista ALLA ${managers.length} spelare, ingen undantagen.`},
+    {role:'system', content:`Du är en FPL-assistent som analyserar mini-ligan 'Big Blinds' (${managers.length} spelare, GW${currentGW}). Kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38.\nSpelare: ${playerNames}.\nSvara på svenska med emojis. Var kortfattad men fullständig.\nKRITISK REGEL: Använd ALLTID verktygen för exakt data. Uppfinn ALDRIG siffror. Skicka ALDRIG extra parametrar till verktygen utöver de som finns i schemat.`},
     {role:'user', content:question}
   ];
   const tools = buildToolSchemas();
@@ -618,14 +619,21 @@ async function runFunctionCalling(question) {
 }
 
 async function callGroq(body) {
-  const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  if (!r.ok) {
-    // Groq misslyckades med att generera ett tool-anrop — returnera ett vänligt svar
-    return {choice:{finish_reason:'stop', message:{role:'assistant', content:'Tyvärr kunde jag inte tolka den frågan. Försök omformulera den! 🙏'}}};
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    if (r.ok) {
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      return d;
+    }
+    // On first 400 (bad tool call generation), wait briefly and retry
+    if (attempt === 0 && r.status === 400) {
+      await new Promise(res => setTimeout(res, 800));
+      continue;
+    }
+    break;
   }
-  const d = await r.json();
-  if (d.error) throw new Error(d.error);
-  return d;
+  return {choice:{finish_reason:'stop', message:{role:'assistant', content:'Jag förstår inte frågan, kan du omformulera den? 🙏'}}};
 }
 
 // ── DEAD CODE REMOVED — old regex query engine replaced by function calling ──
