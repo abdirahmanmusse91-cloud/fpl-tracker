@@ -643,9 +643,10 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
                 json=payload,
             )
 
-        if r.status_code == 429:
-            return {"error": "rate_limit", "message": AI_ERROR_MESSAGES["rate_limit"]}
         if r.status_code != 200:
+            print(f"[Gemini] HTTP {r.status_code}: {r.text[:500]}")
+            if r.status_code == 429:
+                return {"error": "rate_limit", "message": AI_ERROR_MESSAGES["rate_limit"]}
             return {"error": "api_error", "message": AI_ERROR_MESSAGES["api_error"]}
 
         data = r.json()
