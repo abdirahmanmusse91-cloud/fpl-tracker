@@ -363,6 +363,11 @@ async def chat(body: dict):
         return {"choice": r.json()["choices"][0]}
 
 
+@app.get("/api/ping")
+async def ping():
+    return {"status": "ok"}
+
+
 @app.get("/")
 async def root():
     return FileResponse("index.html")
