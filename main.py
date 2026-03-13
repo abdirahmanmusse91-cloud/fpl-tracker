@@ -330,37 +330,68 @@ async def sync_all():
     return {"synced": synced, "total": len(entries), "gws_cached": sorted(historical_set)}
 
 
-# ── Groq chat ──
+# ── Gemini chat ──
 
 @app.post("/api/chat")
 async def chat(body: dict):
-    api_key = os.environ.get("GROQ_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY saknas")
+        return {"error": "config", "message": "AI-tjänsten är inte konfigurerad. Kontakta administratören."}
 
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": body.get("messages", []),
-        "max_tokens": body.get("max_tokens", 1000),
+    messages = body.get("messages", [])
+    max_tokens = body.get("max_tokens", 600)
+
+    # Convert OpenAI-style messages to Gemini format
+    system_content = None
+    contents = []
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content", "")
+        if role == "system":
+            system_content = content
+        elif role == "user":
+            contents.append({"role": "user", "parts": [{"text": content}]})
+        elif role == "assistant":
+            contents.append({"role": "model", "parts": [{"text": content}]})
+
+    payload: dict = {
+        "contents": contents,
+        "generationConfig": {"maxOutputTokens": max_tokens},
     }
-    if "tools" in body:
-        payload["tools"] = body["tools"]
-        payload["tool_choice"] = "auto"
+    if system_content:
+        payload["systemInstruction"] = {"parts": [{"text": system_content}]}
 
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+            headers={"Content-Type": "application/json"},
             json=payload,
         )
-        if r.status_code != 200:
-            raise HTTPException(
-                status_code=r.status_code, detail=f"Groq API error: {r.text}"
-            )
-        return {"choice": r.json()["choices"][0]}
+
+    if r.status_code == 429:
+        return {"error": "rate_limit", "message": "Systemet vilar – försök igen om en liten stund. ⏳"}
+    if r.status_code == 400:
+        return {"error": "bad_request", "message": "Jag förstod inte helt. Fråga gärna om poäng, tabell eller spelare! 🤔"}
+    if r.status_code != 200:
+        return {"error": "api_error", "message": f"Tillfälligt fel ({r.status_code}), försök igen. 🔧"}
+
+    data = r.json()
+    candidates = data.get("candidates", [])
+    if not candidates:
+        finish = data.get("promptFeedback", {}).get("blockReason")
+        if finish:
+            return {"error": "blocked", "message": "Frågan kunde inte besvaras. Försök omformulera den. 🙏"}
+        return {"error": "empty", "message": "Hittade ingen statistik för det du frågade om. 📊"}
+
+    text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+    if not text:
+        return {"error": "empty", "message": "Hittade ingen statistik för det du frågade om. 📊"}
+
+    finish_reason = candidates[0].get("finishReason", "")
+    if finish_reason == "SAFETY":
+        return {"error": "blocked", "message": "Frågan kunde inte besvaras. Försök omformulera den. 🙏"}
+
+    return {"content": text}
 
 
 @app.get("/api/ping")

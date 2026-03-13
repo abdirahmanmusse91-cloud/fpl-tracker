@@ -276,7 +276,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
         <input class="chat-input" id="chat-input" placeholder="Fråga om din liga…" onkeydown="if(event.key==='Enter')sendMessage()">
         <button class="send-btn" id="send-btn" onclick="sendMessage()" disabled>➤</button>
       </div>
-      <div class="api-note">Drivs av Groq · Live ligadata</div>
+      <div class="api-note">Drivs av Gemini · Live ligadata</div>
     </div>
   </aside>
 </div>
@@ -469,24 +469,32 @@ ${consistency}
 ${gwLines.join('\n')}`;
 }
 
-async function callGroq(messages) {
+const AI_ERRORS = {
+  rate_limit: 'Systemet vilar – försök igen om en liten stund. ⏳',
+  empty:      'Hittade ingen statistik för det du frågade om. 📊',
+  bad_request:'Jag förstod inte helt. Fråga gärna om poäng, tabell eller spelare! 🤔',
+  blocked:    'Frågan kunde inte besvaras. Försök omformulera den. 🙏',
+  config:     'AI-tjänsten är inte konfigurerad. Kontakta administratören. ⚙️',
+  api_error:  'Tillfälligt fel, försök igen om en stund. 🔧',
+  network:    'Nätverksfel – kontrollera din anslutning. 📡',
+};
+
+async function callAI(messages) {
   try {
     const r = await fetch('/api/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({messages, max_tokens: 600})
     });
-    if (r.ok) {
-      const d = await r.json();
-      return d.choice?.message?.content || null;
-    }
-    // Log non-200 so we can diagnose in browser DevTools → Console
-    const errText = await r.text().catch(() => '(no body)');
-    console.error(`[Groq] HTTP ${r.status}:`, errText);
+    const d = await r.json();
+    if (d.error) return {error: d.error, message: d.message || AI_ERRORS[d.error] || 'Något gick fel.'};
+    if (d.content) return {content: d.content};
+    console.error('[AI] Unexpected response:', d);
+    return {error: 'api_error', message: AI_ERRORS.api_error};
   } catch(e) {
-    console.error('[Groq] fetch exception:', e);
+    console.error('[AI] fetch exception:', e);
+    return {error: 'network', message: AI_ERRORS.network};
   }
-  return null;
 }
 
 async function sendMessage(text) {
@@ -504,20 +512,19 @@ async function sendMessage(text) {
       {role: 'system', content: buildSystemMessage()},
       ...chatHistory.slice(-10)
     ];
-    const answer = await callGroq(messages);
-    if (answer) {
-      chatHistory.push({role: 'assistant', content: answer});
-      typing.remove();
-      appendMsg(answer, 'ai');
-    } else {
+    const result = await callAI(messages);
+    typing.remove();
+    if (result.error) {
       chatHistory.pop();
-      typing.remove();
-      appendMsg('Jag förstår inte frågan, kan du omformulera den? 🙏', 'ai');
+      appendMsg(result.message, 'ai');
+    } else {
+      chatHistory.push({role: 'assistant', content: result.content});
+      appendMsg(result.content, 'ai');
     }
   } catch(e) {
     chatHistory.pop();
     typing.remove();
-    appendMsg('Fel vid anrop till servern.', 'ai');
+    appendMsg(AI_ERRORS.api_error, 'ai');
     console.error(e);
   }
   document.getElementById('send-btn').disabled = false;
