@@ -190,6 +190,22 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 }
 .chat-close-btn:hover { color:var(--text); }
 
+/* Live badge */
+.live-badge { background:rgba(255,68,85,0.1); border:1px solid var(--red); color:var(--red); font-family:'IBM Plex Mono',monospace; font-size:0.65rem; letter-spacing:2px; padding:4px 10px; border-radius:20px; animation:livepulse 2s infinite; }
+@keyframes livepulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+/* Toast */
+.toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%) translateY(20px); background:linear-gradient(135deg,var(--g),var(--g2)); color:#000; padding:12px 20px; border-radius:8px; font-weight:600; font-size:0.85rem; box-shadow:0 4px 20px rgba(0,255,135,0.4); z-index:1000; opacity:0; transition:all 0.3s; pointer-events:none; white-space:nowrap; }
+.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* Notification form */
+.notif-btn { background:none; border:none; color:var(--muted2); font-size:1rem; cursor:pointer; padding:4px; }
+.notif-btn:hover { color:var(--text); }
+.notif-form { padding:12px 14px; border-bottom:1px solid var(--border); background:var(--card2); }
+.notif-title { font-family:'Bebas Neue',sans-serif; font-size:0.9rem; letter-spacing:2px; color:var(--g); margin-bottom:3px; }
+.notif-desc { font-size:0.68rem; color:var(--muted); margin-bottom:8px; }
+.notif-status { font-size:0.68rem; margin-top:6px; color:var(--muted2); min-height:14px; }
+
 /* Bar mode toggle */
 .bar-toggle { display:flex; gap:4px; }
 .bar-toggle-btn { font-size:0.6rem; letter-spacing:1px; padding:3px 10px; border-radius:4px; border:1px solid var(--border2); background:transparent; color:var(--muted); cursor:pointer; font-family:'IBM Plex Mono',monospace; transition:all 0.15s; }
@@ -205,7 +221,10 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
       <div class="logo-sub">Liga · Live Data</div>
     </div>
   </div>
-  <div class="gw-pill hidden" id="gw-pill">GW —</div>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <div class="live-badge hidden" id="live-badge">● LIVE</div>
+    <div class="gw-pill hidden" id="gw-pill">GW —</div>
+  </div>
 </header>
 
 <div class="app">
@@ -257,7 +276,17 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
         <div class="chat-title">⚡ FPL Assistent</div>
         <div class="chat-sub">Ställ frågor om din liga</div>
       </div>
-      <button class="chat-close-btn" onclick="toggleChat()">✕</button>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="notif-btn" onclick="toggleNotifForm()" title="Notifieringar">🔔</button>
+        <button class="chat-close-btn" onclick="toggleChat()">✕</button>
+      </div>
+    </div>
+    <div class="notif-form hidden" id="notif-form">
+      <div class="notif-title">Notifieringar</div>
+      <div class="notif-desc">Få ett meddelande när ligaledaren ändras.</div>
+      <input class="chat-input" id="notif-email" placeholder="din@email.se" type="email" style="margin-bottom:6px;">
+      <button class="send-btn" onclick="subscribeNotif()" style="width:100%;border-radius:6px;height:34px;">Prenumerera</button>
+      <div class="notif-status" id="notif-status"></div>
     </div>
     <div class="chat-messages" id="chat-messages">
       <div class="msg msg-ai">
@@ -283,14 +312,33 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 
 <script>
 const LEAGUE_ID = 1076120;
-const BASE = ''; // same origin
+const QUARTERS = {1:[1,10], 2:[11,20], 3:[21,30], 4:[31,38]};
 
-let managers = [], gwHistory = {}, currentGW = 1, selectedGW = 1, dataLoaded = false;
+// Persistent session ID for chat history
+const SESSION_ID = (() => {
+  let id = localStorage.getItem('fpl_session_id');
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+    localStorage.setItem('fpl_session_id', id);
+  }
+  return id;
+})();
+
+let managers = [], gwHistory = {}, currentGW = 1, selectedGW = 1, dataLoaded = false, isLive = false;
+let pollTimer = null;
 
 async function get(path) {
-  const r = await fetch(BASE + path);
+  const r = await fetch(path);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
+}
+
+function parseGwHistory(raw) {
+  const h = {};
+  for (const [eid, hist] of Object.entries(raw)) {
+    h[parseInt(eid)] = Object.fromEntries(Object.entries(hist).map(([gw, pts]) => [parseInt(gw), pts]));
+  }
+  return h;
 }
 
 async function init() {
@@ -298,12 +346,8 @@ async function init() {
     const data = await get(`/api/dashboard/${LEAGUE_ID}`);
     managers  = data.managers;
     currentGW = data.current_gw;
-    gwHistory = {};
-    for (const [eid, hist] of Object.entries(data.gw_history)) {
-      gwHistory[parseInt(eid)] = Object.fromEntries(
-        Object.entries(hist).map(([gw, pts]) => [parseInt(gw), pts])
-      );
-    }
+    isLive    = data.is_live || false;
+    gwHistory = parseGwHistory(data.gw_history);
     selectedGW = currentGW;
     dataLoaded = true;
     document.getElementById('loading').classList.add('hidden');
@@ -311,13 +355,58 @@ async function init() {
     document.getElementById('send-btn').disabled = false;
     document.getElementById('gw-pill').textContent = `GW ${currentGW}`;
     document.getElementById('gw-pill').classList.remove('hidden');
+    updateLiveBadge(isLive);
+    checkLeaderChange(managers[0]?.player_name);
     render();
+    startPolling(isLive);
+    loadChatHistory();
   } catch(e) {
     document.getElementById('loading').classList.add('hidden');
     const eb = document.getElementById('error-box');
     eb.style.display = 'block';
     eb.innerHTML = `<strong>Kunde inte hämta data.</strong><br>${e.message}`;
   }
+}
+
+async function refreshData() {
+  try {
+    const data = await get(`/api/dashboard/${LEAGUE_ID}`);
+    managers  = data.managers;
+    currentGW = data.current_gw;
+    isLive    = data.is_live || false;
+    gwHistory = parseGwHistory(data.gw_history);
+    selectedGW = currentGW;
+    updateLiveBadge(isLive);
+    checkLeaderChange(managers[0]?.player_name);
+    render();
+  } catch(e) { /* silent */ }
+  startPolling(isLive);
+}
+
+function startPolling(live) {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(() => refreshData(), live ? 3 * 60 * 1000 : 30 * 60 * 1000);
+}
+
+function updateLiveBadge(live) {
+  const badge = document.getElementById('live-badge');
+  if (badge) badge.classList.toggle('hidden', !live);
+}
+
+function checkLeaderChange(newLeader) {
+  if (!newLeader) return;
+  const prev = localStorage.getItem('fpl_leader');
+  if (prev && prev !== newLeader) showToast(`🏆 Ny ligaledare: ${newLeader}!`);
+  localStorage.setItem('fpl_leader', newLeader);
+}
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.classList.add('show'), 10);
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 4500);
 }
 
 function render() {
@@ -412,89 +501,52 @@ function renderBars(gw) {
     <div class="bar-total">${subVal(s)}</div></div>`).join('');
 }
 
-// ── CHAT — direct data context (no function calling) ──
-const QUARTERS = {1:[1,10], 2:[11,20], 3:[21,30], 4:[31,38]};
+// ── CHAT ──
 let chatHistory = [];
 
-function buildSystemMessage() {
-  const order = managers.map(m => m.player_name);
-
-  // Ligatabell
-  const standings = managers.map((m, i) =>
-    `${i+1}. ${m.player_name} (${m.entry_name}) — ${m.total}p`
-  ).join('\n');
-
-  // GW-vinster (förberäknade)
-  const wins = Object.fromEntries(managers.map(m => [m.player_name, 0]));
-  for (let gw = 1; gw <= currentGW; gw++) {
-    const scores = managers.map(m => gwHistory[m.entry]?.[gw] || 0);
-    const max = Math.max(...scores);
-    if (max > 0) managers.forEach((m, i) => { if (scores[i] === max) wins[m.player_name]++; });
-  }
-  const winsStr = Object.entries(wins)
-    .sort((a, b) => b[1] - a[1])
-    .map(([n, w]) => `${n}: ${w}`)
-    .join(', ');
-
-  // Konsistensstatistik
-  const consistency = managers.map(m => {
-    const scores = Array.from({length: currentGW}, (_, i) => gwHistory[m.entry]?.[i+1] || 0);
-    const avg = scores.reduce((s, p) => s + p, 0) / scores.length;
-    const stddev = Math.sqrt(scores.reduce((s, p) => s + Math.pow(p - avg, 2), 0) / scores.length);
-    return `${m.player_name}: snitt=${avg.toFixed(1)} stddev=${stddev.toFixed(1)} min=${Math.min(...scores)} max=${Math.max(...scores)}`;
-  }).join('\n');
-
-  // Alla GW-poäng som kompakt tabell
-  const gwLines = [];
-  for (let gw = 1; gw <= currentGW; gw++) {
-    const scores = managers.map(m => gwHistory[m.entry]?.[gw] || 0);
-    gwLines.push(`GW${String(gw).padStart(2,'0')}: ${scores.join(',')}`);
-  }
-
-  return `Du är en FPL-assistent för mini-ligan "Big Blinds" (${managers.length} spelare, GW${currentGW}).
-Svara på svenska med emojis. Var kortfattad men fullständig.
-KRITISK REGEL: Använd ENBART nedanstående data — uppfinn ALDRIG siffror.
-Kvartal: K1=GW1-10, K2=GW11-20, K3=GW21-30, K4=GW31-38.
-
-─── LIGATABELL (efter GW${currentGW}) ───
-${standings}
-
-─── GW-VINSTER (antal omgångar med högst poäng) ───
-${winsStr}
-
-─── KONSISTENS ───
-${consistency}
-
-─── ALLA GW-POÄNG (spelare i ordning: ${order.join(', ')}) ───
-${gwLines.join('\n')}`;
-}
-
 const AI_ERRORS = {
-  rate_limit: 'Systemet vilar – försök igen om en liten stund. ⏳',
-  empty:      'Hittade ingen statistik för det du frågade om. 📊',
-  bad_request:'Jag förstod inte helt. Fråga gärna om poäng, tabell eller spelare! 🤔',
-  blocked:    'Frågan kunde inte besvaras. Försök omformulera den. 🙏',
-  config:     'AI-tjänsten är inte konfigurerad. Kontakta administratören. ⚙️',
-  api_error:  'Tillfälligt fel, försök igen om en stund. 🔧',
-  network:    'Nätverksfel – kontrollera din anslutning. 📡',
+  rate_limit:  'Systemet vilar – försök igen om en stund. ⏳',
+  empty:       'Hittade ingen statistik för det du frågade om. 📊',
+  bad_request: 'Jag förstod inte helt. Fråga gärna om poäng, tabell eller spelare! 🤔',
+  blocked:     'Frågan kunde inte besvaras. Försök omformulera den. 🙏',
+  config:      'AI-tjänsten är inte konfigurerad. Kontakta administratören. ⚙️',
+  api_error:   'Tillfälligt fel, försök igen om en stund. 🔧',
+  network:     'Nätverksfel – kontrollera din anslutning. 📡',
 };
 
-async function callAI(messages) {
+async function callAI(userMessage) {
   try {
     const r = await fetch('/api/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({messages, max_tokens: 600})
+      body: JSON.stringify({
+        user_message: userMessage,
+        history: chatHistory.slice(-10),
+        session_id: SESSION_ID,
+        league_id: LEAGUE_ID,
+      })
     });
     const d = await r.json();
     if (d.error) return {error: d.error, message: d.message || AI_ERRORS[d.error] || 'Något gick fel.'};
     if (d.content) return {content: d.content};
-    console.error('[AI] Unexpected response:', d);
     return {error: 'api_error', message: AI_ERRORS.api_error};
   } catch(e) {
     console.error('[AI] fetch exception:', e);
     return {error: 'network', message: AI_ERRORS.network};
   }
+}
+
+async function loadChatHistory() {
+  try {
+    const d = await get(`/api/chat/history/${SESSION_ID}`);
+    if (d.messages && d.messages.length > 0) {
+      document.getElementById('suggestions').style.display = 'none';
+      d.messages.forEach(msg => {
+        appendMsg(msg.content, msg.role === 'user' ? 'user' : 'ai');
+        chatHistory.push({role: msg.role === 'assistant' ? 'assistant' : msg.role, content: msg.content});
+      });
+    }
+  } catch(e) { /* silent */ }
 }
 
 async function sendMessage(text) {
@@ -508,11 +560,7 @@ async function sendMessage(text) {
   document.getElementById('send-btn').disabled = true;
   chatHistory.push({role: 'user', content: msg});
   try {
-    const messages = [
-      {role: 'system', content: buildSystemMessage()},
-      ...chatHistory.slice(-10)
-    ];
-    const result = await callAI(messages);
+    const result = await callAI(msg);
     typing.remove();
     if (result.error) {
       chatHistory.pop();
@@ -528,6 +576,30 @@ async function sendMessage(text) {
     console.error(e);
   }
   document.getElementById('send-btn').disabled = false;
+}
+
+// ── Notifications ──
+function toggleNotifForm() {
+  document.getElementById('notif-form').classList.toggle('hidden');
+}
+
+async function subscribeNotif() {
+  const email = document.getElementById('notif-email').value.trim();
+  const status = document.getElementById('notif-status');
+  if (!email) { status.textContent = 'Ange en e-postadress.'; return; }
+  try {
+    const r = await fetch('/api/notifications/subscribe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email})
+    });
+    const d = await r.json();
+    status.textContent = d.message || d.error || 'Klart!';
+    if (d.ok) {
+      document.getElementById('notif-email').value = '';
+      setTimeout(() => document.getElementById('notif-form').classList.add('hidden'), 2500);
+    }
+  } catch(e) { status.textContent = 'Nätverksfel, försök igen.'; }
 }
 
 function appendMsg(text,role) {
