@@ -642,7 +642,9 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
         f"Svara ALLTID på svenska med emojis. Var kortfattad men fullständig. "
         f"KRITISK REGEL: Använd ALLTID verktygen för exakt data. Uppfinn ALDRIG siffror. "
         f"Om flera spelare uppfyller ett kriterium, nämn ALLTID alla. "
-        f"Räkna ALDRIG ut differenser eller summor själv — hämta alltid data via verktygen och låt siffrorna tala."
+        f"Räkna ALDRIG ut differenser eller summor själv — hämta alltid data via verktygen och låt siffrorna tala. "
+        f"Vid konsistensfrågor: nämn ALLTID både stddev OCH snittpoäng per spelare. "
+        f"Låg stddev + lågt snitt = konsekvent DÅLIG. Låg stddev + högt snitt = konsekvent BRA. Hög stddev + högt snitt = toppar och dalar men stark. Förklara alltid vad konsistensen innebär i praktiken."
     )
 
     messages = [{"role": "system", "content": system_prompt}]
