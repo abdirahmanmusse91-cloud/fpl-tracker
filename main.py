@@ -706,6 +706,7 @@ def execute_tool(name: str, args: dict, tool_fns: dict):
 
 AI_ERROR_MESSAGES = {
     "rate_limit":  "För många frågor på kort tid – vänta en minut och försök igen. ⏳",
+    "daily_limit": "Dagens frågegräns är nådd – chatten öppnar igen vid midnatt. 🌙",
     "empty":       "Kunde inte svara på det – försök omformulera frågan. 🤔",
     "bad_request": "Jag förstod inte helt. Fråga gärna om poäng, tabell eller spelare! 🤔",
     "blocked":     "Den frågan kan jag inte svara på – håll dig till liga och statistik. ⚽",
@@ -781,9 +782,11 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
             print(f"[Groq] HTTP {r.status_code}: {r.text[:500]}")
             ms = int((time.time() - t_start) * 1000)
             if r.status_code == 429:
-                background_tasks.add_task(sb_log, "warn", "Groq rate limit", "/api/chat", 429, ms,
+                is_daily = "per day" in r.text.lower() or "tpd" in r.text.lower() or "rpd" in r.text.lower()
+                err_key = "daily_limit" if is_daily else "rate_limit"
+                background_tasks.add_task(sb_log, "warn", f"Groq {err_key}", "/api/chat", 429, ms,
                                           {"question": user_message[:100], "error": r.text[:200]})
-                return {"error": "rate_limit", "message": AI_ERROR_MESSAGES["rate_limit"]}
+                return {"error": err_key, "message": AI_ERROR_MESSAGES[err_key]}
             if r.status_code == 400 and "tool_use_failed" in r.text:
                 # Llama generated malformed tool JSON — retry with only current message
                 messages = [{"role": "system", "content": system_prompt},
