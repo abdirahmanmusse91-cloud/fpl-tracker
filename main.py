@@ -667,6 +667,11 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
                 background_tasks.add_task(sb_log, "warn", "Groq rate limit", "/api/chat", 429, ms,
                                           {"question": user_message[:100], "error": r.text[:200]})
                 return {"error": "rate_limit", "message": AI_ERROR_MESSAGES["rate_limit"]}
+            if r.status_code == 400 and "tool_use_failed" in r.text:
+                # Llama generated malformed tool JSON — retry with only current message
+                messages = [{"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_message}]
+                continue
             background_tasks.add_task(sb_log, "error", f"Groq HTTP {r.status_code}", "/api/chat", r.status_code, ms,
                                       {"question": user_message[:100], "error": r.text[:200]})
             return {"error": "api_error", "message": AI_ERROR_MESSAGES["api_error"]}
