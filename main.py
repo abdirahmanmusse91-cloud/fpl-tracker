@@ -58,16 +58,18 @@ async def get_bootstrap() -> dict:
 
 
 def get_finished_gws(boot: dict) -> tuple[list[int], int]:
-    finished = sorted(e["id"] for e in boot["events"] if e["finished"])
-    current = finished[-1] if finished else 1
+    events = boot.get("events", [])
+    finished = sorted(e["id"] for e in events if e["finished"])
+    # Use the is_current event as current_gw (may be live/unfinished)
+    current = next((e["id"] for e in events if e.get("is_current")), None)
+    if current is None:
+        current = finished[-1] if finished else 1
     return finished, current
 
 
 def is_gw_live(boot: dict, current_gw: int) -> bool:
-    current = next((e for e in boot.get("events", []) if e["id"] == current_gw), None)
-    if not current:
-        return False
-    return current.get("is_current", False) and not current.get("finished", True)
+    active = next((e for e in boot.get("events", []) if e["id"] == current_gw), None)
+    return active is not None and not active.get("finished", True)
 
 
 # ── Supabase: gw_cache ──
@@ -270,7 +272,9 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
     boot = await get_bootstrap()
     all_finished, current_gw = get_finished_gws(boot)
     live = is_gw_live(boot, current_gw)
+    # historical = all finished GWs; if current GW is live, include it too for live scores
     historical_set = set(gw for gw in all_finished if gw < current_gw)
+    gws_to_fetch = historical_set | {current_gw}
 
     async with httpx.AsyncClient(timeout=15) as c:
         league_r = await c.get(
@@ -291,7 +295,7 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
         current_ts = synced_at_map.get(eid, {}).get(current_gw)
         if current_ts is None or (now - current_ts) > CURRENT_GW_TTL:
             needs_current.append(eid)
-        missing = historical_set - set(gw_history.get(eid, {}).keys())
+        missing = gws_to_fetch - set(gw_history.get(eid, {}).keys())
         if missing:
             needs_historical[eid] = missing
 
@@ -719,6 +723,7 @@ async def subscribe(body: dict):
 # ── Ping ──
 
 @app.get("/api/ping")
+@app.head("/api/ping")
 async def ping():
     return {"status": "ok"}
 
