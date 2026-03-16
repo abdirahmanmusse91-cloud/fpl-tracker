@@ -449,22 +449,20 @@ async def sync_all():
     return {"synced": synced, "total": len(entries), "gws_cached": sorted(historical_set)}
 
 
-# ── Chat: Gemini function calling tools ──
+# ── Chat: Groq/Llama function calling tools ──
 
-GEMINI_TOOLS = [{
-    "function_declarations": [
-        {"name": "get_standings", "description": "Aktuell ligatabell med ranking och totalpoäng för alla spelare", "parameters": {"type": "object", "properties": {}}},
-        {"name": "get_gw_scores", "description": "Poäng för alla spelare i en specifik omgång", "parameters": {"type": "object", "properties": {"gw": {"type": "integer", "description": "Omgångsnummer 1-38"}}, "required": ["gw"]}},
-        {"name": "get_range_scores", "description": "Sammanlagda poäng under ett GW-intervall", "parameters": {"type": "object", "properties": {"from_gw": {"type": "integer"}, "to_gw": {"type": "integer"}}, "required": ["from_gw", "to_gw"]}},
-        {"name": "get_quarter_scores", "description": "Poäng för ett kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38", "parameters": {"type": "object", "properties": {"quarter": {"type": "integer"}}, "required": ["quarter"]}},
-        {"name": "get_consistency", "description": "Konsistensstatistik per spelare: snitt, stddev, min, max per GW", "parameters": {"type": "object", "properties": {}}},
-        {"name": "get_gw_wins", "description": "Antal omgångsvinster per spelare (högst poäng i omgången)", "parameters": {"type": "object", "properties": {"manager_name": {"type": "string", "description": "Spelarnamn, utelämna för alla"}}}},
-        {"name": "get_standings_at_gw", "description": "Ackumulerad ligatabell vid en specifik omgång", "parameters": {"type": "object", "properties": {"gw": {"type": "integer"}}, "required": ["gw"]}},
-        {"name": "get_head_to_head", "description": "Head-to-head statistik mellan två spelare", "parameters": {"type": "object", "properties": {"manager1": {"type": "string"}, "manager2": {"type": "string"}}, "required": ["manager1", "manager2"]}},
-        {"name": "get_all_time_best_gw", "description": "Bästa enskilda omgångsprestationerna under säsongen", "parameters": {"type": "object", "properties": {"top_n": {"type": "integer", "description": "Antal topp-prestationer (standard: 5)"}}}},
-        {"name": "get_overtake_gw", "description": "Alla tillfällen då en spelare gick om en annan i ackumulerad poäng", "parameters": {"type": "object", "properties": {"manager1": {"type": "string"}, "manager2": {"type": "string"}}, "required": ["manager1", "manager2"]}},
-    ]
-}]
+GROQ_TOOLS = [
+    {"type": "function", "function": {"name": "get_standings", "description": "Aktuell ligatabell med ranking och totalpoäng för alla spelare", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "get_gw_scores", "description": "Poäng för alla spelare i en specifik omgång", "parameters": {"type": "object", "properties": {"gw": {"type": "integer", "description": "Omgångsnummer 1-38"}}, "required": ["gw"]}}},
+    {"type": "function", "function": {"name": "get_range_scores", "description": "Sammanlagda poäng under ett GW-intervall", "parameters": {"type": "object", "properties": {"from_gw": {"type": "integer"}, "to_gw": {"type": "integer"}}, "required": ["from_gw", "to_gw"]}}},
+    {"type": "function", "function": {"name": "get_quarter_scores", "description": "Poäng för ett kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38", "parameters": {"type": "object", "properties": {"quarter": {"type": "integer"}}, "required": ["quarter"]}}},
+    {"type": "function", "function": {"name": "get_consistency", "description": "Konsistensstatistik per spelare: snitt, stddev, min, max per GW", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "get_gw_wins", "description": "Antal omgångsvinster per spelare (högst poäng i omgången)", "parameters": {"type": "object", "properties": {"manager_name": {"type": "string", "description": "Spelarnamn, utelämna för alla"}}}}},
+    {"type": "function", "function": {"name": "get_standings_at_gw", "description": "Ackumulerad ligatabell vid en specifik omgång", "parameters": {"type": "object", "properties": {"gw": {"type": "integer"}}, "required": ["gw"]}}},
+    {"type": "function", "function": {"name": "get_head_to_head", "description": "Head-to-head statistik mellan två spelare", "parameters": {"type": "object", "properties": {"manager1": {"type": "string"}, "manager2": {"type": "string"}}, "required": ["manager1", "manager2"]}}},
+    {"type": "function", "function": {"name": "get_all_time_best_gw", "description": "Bästa enskilda omgångsprestationerna under säsongen", "parameters": {"type": "object", "properties": {"top_n": {"type": "integer", "description": "Antal topp-prestationer (standard: 5)"}}}}},
+    {"type": "function", "function": {"name": "get_overtake_gw", "description": "Alla tillfällen då en spelare gick om en annan i ackumulerad poäng", "parameters": {"type": "object", "properties": {"manager1": {"type": "string"}, "manager2": {"type": "string"}}, "required": ["manager1", "manager2"]}}},
+]
 
 
 def make_tool_fns(managers: list, gw_history: dict, current_gw: int) -> dict:
@@ -606,7 +604,7 @@ AI_ERROR_MESSAGES = {
 @app.post("/api/chat")
 async def chat(body: dict, background_tasks: BackgroundTasks):
     t_start = time.time()
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         return {"error": "config", "message": AI_ERROR_MESSAGES["config"]}
 
@@ -641,77 +639,60 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
         f"Du är en FPL-assistent för mini-ligan 'Big Blinds' ({len(managers)} spelare, GW{current_gw}). "
         f"Kvartal: K1=GW1-10, K2=GW11-20, K3=GW21-30, K4=GW31-38. "
         f"Spelare: {player_names}. "
-        f"Svara på svenska med emojis. Var kortfattad men fullständig. "
+        f"Svara ALLTID på svenska med emojis. Var kortfattad men fullständig. "
         f"KRITISK REGEL: Använd ALLTID verktygen för exakt data. Uppfinn ALDRIG siffror."
     )
 
-    contents = []
+    messages = [{"role": "system", "content": system_prompt}]
     for msg in history[-10:]:
         role = msg.get("role")
-        content = msg.get("content", "")
-        if role == "user":
-            contents.append({"role": "user", "parts": [{"text": content}]})
-        elif role == "assistant":
-            contents.append({"role": "model", "parts": [{"text": content}]})
-    contents.append({"role": "user", "parts": [{"text": user_message}]})
+        if role in ("user", "assistant"):
+            messages.append({"role": role, "content": msg.get("content", "")})
+    messages.append({"role": "user", "content": user_message})
 
     answer = None
     for _ in range(6):
-        payload = {
-            "contents": contents,
-            "systemInstruction": {"parts": [{"text": system_prompt}]},
-            "tools": GEMINI_TOOLS,
-            "generationConfig": {"maxOutputTokens": 800},
-        }
         async with httpx.AsyncClient(timeout=30) as c:
             r = await c.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={api_key}",
-                headers={"Content-Type": "application/json"},
-                json=payload,
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": "llama-3.3-70b-versatile", "messages": messages,
+                      "tools": GROQ_TOOLS, "max_tokens": 800},
             )
 
         if r.status_code != 200:
-            print(f"[Gemini] HTTP {r.status_code}: {r.text[:500]}")
+            print(f"[Groq] HTTP {r.status_code}: {r.text[:500]}")
             ms = int((time.time() - t_start) * 1000)
             if r.status_code == 429:
-                background_tasks.add_task(sb_log, "warn", "Gemini rate limit", "/api/chat", 429, ms,
-                                          {"question": user_message[:100], "gemini_error": r.text[:200]})
+                background_tasks.add_task(sb_log, "warn", "Groq rate limit", "/api/chat", 429, ms,
+                                          {"question": user_message[:100], "error": r.text[:200]})
                 return {"error": "rate_limit", "message": AI_ERROR_MESSAGES["rate_limit"]}
-            background_tasks.add_task(sb_log, "error", f"Gemini HTTP {r.status_code}", "/api/chat", r.status_code, ms,
-                                      {"question": user_message[:100], "gemini_error": r.text[:200]})
+            background_tasks.add_task(sb_log, "error", f"Groq HTTP {r.status_code}", "/api/chat", r.status_code, ms,
+                                      {"question": user_message[:100], "error": r.text[:200]})
             return {"error": "api_error", "message": AI_ERROR_MESSAGES["api_error"]}
 
         data = r.json()
-        candidates = data.get("candidates", [])
-        if not candidates:
-            break
+        choice = data["choices"][0]
+        msg_out = choice["message"]
+        finish_reason = choice.get("finish_reason", "")
 
-        candidate = candidates[0]
-        parts = candidate.get("content", {}).get("parts", [])
-        finish_reason = candidate.get("finishReason", "")
-
-        if finish_reason == "SAFETY":
-            return {"error": "blocked", "message": AI_ERROR_MESSAGES["blocked"]}
-
-        function_calls = [p for p in parts if "functionCall" in p]
-        if function_calls:
-            contents.append({"role": "model", "parts": parts})
-            responses = []
-            for fc in function_calls:
-                fn_name = fc["functionCall"]["name"]
-                fn_args = fc["functionCall"].get("args", {})
+        tool_calls = msg_out.get("tool_calls") or []
+        if tool_calls:
+            messages.append(msg_out)
+            for tc in tool_calls:
+                fn_name = tc["function"]["name"]
+                fn_args = json.loads(tc["function"].get("arguments") or "{}")
                 result = execute_tool(fn_name, fn_args, tool_fns)
-                responses.append({"functionResponse": {"name": fn_name, "response": {"result": result}}})
-            contents.append({"role": "user", "parts": responses})
+                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": json.dumps(result)})
         else:
-            text = "".join(p.get("text", "") for p in parts if "text" in p).strip()
+            text = (msg_out.get("content") or "").strip()
             if text:
                 answer = text
             break
 
     ms = int((time.time() - t_start) * 1000)
     if not answer:
-        background_tasks.add_task(sb_log, "warn", "Gemini empty response", "/api/chat", 200, ms,
+        background_tasks.add_task(sb_log, "warn", "Groq empty response", "/api/chat", 200, ms,
                                   {"question": user_message[:100]})
         return {"error": "empty", "message": AI_ERROR_MESSAGES["empty"]}
 
