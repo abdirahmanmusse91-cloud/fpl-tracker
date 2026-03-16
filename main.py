@@ -640,7 +640,9 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
         f"Kvartal: K1=GW1-10, K2=GW11-20, K3=GW21-30, K4=GW31-38. "
         f"Spelare: {player_names}. "
         f"Svara ALLTID på svenska med emojis. Var kortfattad men fullständig. "
-        f"KRITISK REGEL: Använd ALLTID verktygen för exakt data. Uppfinn ALDRIG siffror."
+        f"KRITISK REGEL: Använd ALLTID verktygen för exakt data. Uppfinn ALDRIG siffror. "
+        f"Om flera spelare uppfyller ett kriterium, nämn ALLTID alla. "
+        f"Räkna ALDRIG ut differenser eller summor själv — hämta alltid data via verktygen och låt siffrorna tala."
     )
 
     messages = [{"role": "system", "content": system_prompt}]
