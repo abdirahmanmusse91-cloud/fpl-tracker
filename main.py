@@ -462,6 +462,7 @@ GROQ_TOOLS = [
     {"type": "function", "function": {"name": "get_head_to_head", "description": "Head-to-head statistik mellan två spelare", "parameters": {"type": "object", "properties": {"manager1": {"type": "string"}, "manager2": {"type": "string"}}, "required": ["manager1", "manager2"]}}},
     {"type": "function", "function": {"name": "get_all_time_best_gw", "description": "Bästa enskilda omgångsprestationerna under säsongen", "parameters": {"type": "object", "properties": {"top_n": {"type": "integer", "description": "Antal topp-prestationer (standard: 5)"}}}}},
     {"type": "function", "function": {"name": "get_overtake_gw", "description": "Alla tillfällen då en spelare gick om en annan i ackumulerad poäng", "parameters": {"type": "object", "properties": {"manager1": {"type": "string"}, "manager2": {"type": "string"}}, "required": ["manager1", "manager2"]}}},
+    {"type": "function", "function": {"name": "get_quarter_progression", "description": "Löpande kvartalstabell GW för GW — visar vem som ledde efter varje omgång i kvartalet och hur ställningen förändrades", "parameters": {"type": "object", "properties": {"quarter": {"type": "integer", "description": "Kvartal 1-4"}}, "required": ["quarter"]}}},
 ]
 
 
@@ -563,12 +564,33 @@ def make_tool_fns(managers: list, gw_history: dict, current_gw: int) -> dict:
                 overtakes.append({"gw": gw, "event": f"{m2['player_name']} gick om {m1['player_name']}", "gap": cum2 - cum1})
         return overtakes
 
+    def get_quarter_progression(quarter):
+        f, t = QUARTERS.get(quarter, (1, current_gw))
+        gws = range(f, min(t, current_gw) + 1)
+        # Cumulative points within the quarter per GW
+        result = []
+        for gw in gws:
+            cumulative = {}
+            for m in managers:
+                cumulative[m["player_name"]] = sum(
+                    gw_history.get(m["entry"], {}).get(g, 0) for g in range(f, gw + 1)
+                )
+            ranked = sorted(cumulative.items(), key=lambda x: -x[1])
+            leader = ranked[0][0]
+            result.append({
+                "gw": gw,
+                "leader": leader,
+                "standings": [{"rank": i+1, "name": n, "pts": p} for i, (n, p) in enumerate(ranked)]
+            })
+        return result
+
     return {
         "get_standings": get_standings, "get_gw_scores": get_gw_scores,
         "get_range_scores": get_range_scores, "get_quarter_scores": get_quarter_scores,
         "get_consistency": get_consistency, "get_gw_wins": get_gw_wins,
         "get_standings_at_gw": get_standings_at_gw, "get_head_to_head": get_head_to_head,
         "get_all_time_best_gw": get_all_time_best_gw, "get_overtake_gw": get_overtake_gw,
+        "get_quarter_progression": get_quarter_progression,
     }
 
 
@@ -583,7 +605,8 @@ def execute_tool(name: str, args: dict, tool_fns: dict):
         if name == "get_standings_at_gw":   return tool_fns["get_standings_at_gw"](args["gw"])
         if name == "get_head_to_head":      return tool_fns["get_head_to_head"](args["manager1"], args["manager2"])
         if name == "get_all_time_best_gw":  return tool_fns["get_all_time_best_gw"](args.get("top_n"))
-        if name == "get_overtake_gw":       return tool_fns["get_overtake_gw"](args["manager1"], args["manager2"])
+        if name == "get_overtake_gw":          return tool_fns["get_overtake_gw"](args["manager1"], args["manager2"])
+        if name == "get_quarter_progression":  return tool_fns["get_quarter_progression"](args["quarter"])
         return {"error": f"Unknown tool: {name}"}
     except Exception as e:
         return {"error": str(e)}
