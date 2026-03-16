@@ -72,6 +72,28 @@ def is_gw_live(boot: dict, current_gw: int) -> bool:
     return active is not None and not active.get("finished", True)
 
 
+# ── Supabase: logs ──
+
+async def sb_log(level: str, message: str, endpoint: str = None,
+                 status_code: int = None, duration_ms: int = None, metadata: dict = None) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=4) as c:
+            await c.post(
+                f"{SUPABASE_URL}/rest/v1/logs",
+                headers=SB_HEADERS,
+                json={
+                    "level": level,
+                    "endpoint": endpoint,
+                    "message": message,
+                    "status_code": status_code,
+                    "duration_ms": duration_ms,
+                    "metadata": metadata,
+                },
+            )
+    except Exception:
+        pass
+
+
 # ── Supabase: gw_cache ──
 
 async def sb_read(entry_id: int) -> dict[int, int]:
@@ -583,6 +605,7 @@ AI_ERROR_MESSAGES = {
 
 @app.post("/api/chat")
 async def chat(body: dict, background_tasks: BackgroundTasks):
+    t_start = time.time()
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return {"error": "config", "message": AI_ERROR_MESSAGES["config"]}
@@ -649,8 +672,13 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
 
         if r.status_code != 200:
             print(f"[Gemini] HTTP {r.status_code}: {r.text[:500]}")
+            ms = int((time.time() - t_start) * 1000)
             if r.status_code == 429:
+                background_tasks.add_task(sb_log, "warn", "Gemini rate limit", "/api/chat", 429, ms,
+                                          {"question": user_message[:100], "gemini_error": r.text[:200]})
                 return {"error": "rate_limit", "message": AI_ERROR_MESSAGES["rate_limit"]}
+            background_tasks.add_task(sb_log, "error", f"Gemini HTTP {r.status_code}", "/api/chat", r.status_code, ms,
+                                      {"question": user_message[:100], "gemini_error": r.text[:200]})
             return {"error": "api_error", "message": AI_ERROR_MESSAGES["api_error"]}
 
         data = r.json()
@@ -681,11 +709,16 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
                 answer = text
             break
 
+    ms = int((time.time() - t_start) * 1000)
     if not answer:
+        background_tasks.add_task(sb_log, "warn", "Gemini empty response", "/api/chat", 200, ms,
+                                  {"question": user_message[:100]})
         return {"error": "empty", "message": AI_ERROR_MESSAGES["empty"]}
 
     background_tasks.add_task(sb_save_chat, session_id, "user", user_message)
     background_tasks.add_task(sb_save_chat, session_id, "assistant", answer)
+    background_tasks.add_task(sb_log, "info", "Chat OK", "/api/chat", 200, ms,
+                              {"question": user_message[:100]})
 
     return {"content": answer}
 
@@ -718,6 +751,23 @@ async def subscribe(body: dict):
         return {"error": "Kunde inte spara, försök igen."}
     except Exception:
         return {"error": "Serverfel, försök igen."}
+
+
+# ── Logs ──
+
+@app.get("/api/logs")
+async def get_logs(limit: int = 50, level: str = None):
+    try:
+        params = {"select": "*", "order": "ts.desc", "limit": limit}
+        if level:
+            params["level"] = f"eq.{level}"
+        async with httpx.AsyncClient(timeout=8) as c:
+            r = await c.get(f"{SUPABASE_URL}/rest/v1/logs", headers=SB_HEADERS, params=params)
+            if r.status_code == 200:
+                return {"logs": r.json()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"logs": []}
 
 
 # ── Ping ──
