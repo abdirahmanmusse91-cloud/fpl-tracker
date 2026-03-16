@@ -642,7 +642,7 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
         }
         async with httpx.AsyncClient(timeout=30) as c:
             r = await c.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={api_key}",
                 headers={"Content-Type": "application/json"},
                 json=payload,
             )
