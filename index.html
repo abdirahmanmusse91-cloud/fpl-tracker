@@ -210,6 +210,9 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .bar-toggle { display:flex; gap:4px; }
 .bar-toggle-btn { font-size:0.6rem; letter-spacing:1px; padding:3px 10px; border-radius:4px; border:1px solid var(--border2); background:transparent; color:var(--muted); cursor:pointer; font-family:'IBM Plex Mono',monospace; transition:all 0.15s; }
 .bar-toggle-btn.active { background:var(--g); color:#000; border-color:var(--g); font-weight:600; }
+
+/* Updated timestamp */
+.updated-ts { font-size:0.58rem; color:var(--muted); letter-spacing:1px; font-family:'IBM Plex Mono',monospace; text-align:right; margin-top:-10px; margin-bottom:16px; }
 </style>
 </head>
 <body>
@@ -243,6 +246,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
         <div class="stat"><div class="stat-label">Ledare</div><div class="stat-val" id="s-leader-pts" style="font-size:1.4rem">—</div><div class="stat-hint" id="s-leader-name">—</div></div>
         <div class="stat"><div class="stat-label">Bäst denna GW</div><div class="stat-val" id="s-top-gw">—</div><div class="stat-hint" id="s-top-gw-name">—</div></div>
       </div>
+      <div class="updated-ts" id="updated-ts"></div>
       <div class="sec">Topp 3</div>
       <div class="podium" id="podium"></div>
       <div class="sec">Ligatabell</div>
@@ -297,7 +301,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
         <button class="suggest-btn" onclick="askSuggestion(this)">Vem har vunnit flest omgångar?</button>
         <button class="suggest-btn" onclick="askSuggestion(this)">Vem är i bäst form de senaste 5 omgångarna?</button>
         <button class="suggest-btn" onclick="askSuggestion(this)">Vem vann kvartal 1 och hur stor var skillnaden?</button>
-        <button class="suggest-btn" onclick="askSuggestion(this)">Vem har varit mest konsekvent under säsongen?</button>
+        <button class="suggest-btn" onclick="askSuggestion(this)">Vem har den längsta vinstsviten just nu?</button>
       </div>
     </div>
     <div class="chat-input-wrap">
@@ -325,7 +329,7 @@ const SESSION_ID = (() => {
 })();
 
 let managers = [], gwHistory = {}, currentGW = 1, selectedGW = 1, dataLoaded = false, isLive = false;
-let pollTimer = null;
+let pollTimer = null, lastRefreshed = 0, tsTimer = null;
 
 async function get(path) {
   const r = await fetch(path);
@@ -357,7 +361,11 @@ async function init() {
     document.getElementById('gw-pill').classList.remove('hidden');
     updateLiveBadge(isLive);
     checkLeaderChange(managers[0]?.player_name);
+    lastRefreshed = Date.now();
     render();
+    updateSuggestions();
+    updateTimestamp();
+    if (!tsTimer) tsTimer = setInterval(updateTimestamp, 60000);
     startPolling(isLive);
     loadChatHistory();
   } catch(e) {
@@ -378,7 +386,9 @@ async function refreshData() {
     selectedGW = currentGW;
     updateLiveBadge(isLive);
     checkLeaderChange(managers[0]?.player_name);
+    lastRefreshed = Date.now();
     render();
+    updateTimestamp();
   } catch(e) { /* silent */ }
   startPolling(isLive);
 }
@@ -628,6 +638,26 @@ function appendTyping() {
 }
 
 function askSuggestion(btn) { sendMessage(btn.textContent); }
+
+function updateSuggestions() {
+  const sugEl = document.getElementById('suggestions');
+  if (!sugEl || sugEl.style.display === 'none') return;
+  const q = Math.ceil(currentGW / 10);
+  const texts = [
+    `Vem vann GW${currentGW}?`,
+    `Vem är i bäst form de senaste 5 omgångarna?`,
+    `Vem leder kvartal ${q} och hur stor är skillnaden?`,
+    `Vem har den längsta vinstsviten just nu?`,
+  ];
+  sugEl.innerHTML = texts.map(t => `<button class="suggest-btn" onclick="askSuggestion(this)">${t}</button>`).join('');
+}
+
+function updateTimestamp() {
+  const el = document.getElementById('updated-ts');
+  if (!el || !lastRefreshed) return;
+  const mins = Math.floor((Date.now() - lastRefreshed) / 60000);
+  el.textContent = mins < 1 ? 'Uppdaterat: just nu' : `Uppdaterat: ${mins} min sedan`;
+}
 
 function toggleChat() {
   const sidebar = document.querySelector('.sidebar');

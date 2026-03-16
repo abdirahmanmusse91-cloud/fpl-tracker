@@ -463,6 +463,8 @@ GROQ_TOOLS = [
     {"type": "function", "function": {"name": "get_all_time_best_gw", "description": "Bästa enskilda omgångsprestationerna under säsongen", "parameters": {"type": "object", "properties": {"top_n": {"type": "integer", "description": "Antal topp-prestationer (standard: 5)"}}}}},
     {"type": "function", "function": {"name": "get_overtake_gw", "description": "Alla tillfällen då en spelare gick om en annan i ackumulerad poäng", "parameters": {"type": "object", "properties": {"manager1": {"type": "string"}, "manager2": {"type": "string"}}, "required": ["manager1", "manager2"]}}},
     {"type": "function", "function": {"name": "get_quarter_progression", "description": "Löpande kvartalstabell GW för GW — visar vem som ledde efter varje omgång i kvartalet och hur ställningen förändrades", "parameters": {"type": "object", "properties": {"quarter": {"type": "integer", "description": "Kvartal 1-4"}}, "required": ["quarter"]}}},
+    {"type": "function", "function": {"name": "get_streaks", "description": "Nuvarande streak per spelare — antal omgångar i rad med vinst (högst poäng), förlust (lägst poäng) eller mellanplacering", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "get_all_time_worst_gw", "description": "Sämsta enskilda omgångsprestationerna under säsongen (lägst poäng)", "parameters": {"type": "object", "properties": {"bottom_n": {"type": "integer", "description": "Antal sämsta prestationer (standard: 5)"}}}}},
 ]
 
 
@@ -564,6 +566,43 @@ def make_tool_fns(managers: list, gw_history: dict, current_gw: int) -> dict:
                 overtakes.append({"gw": gw, "event": f"{m2['player_name']} gick om {m1['player_name']}", "gap": cum2 - cum1})
         return overtakes
 
+    def get_streaks():
+        result = []
+        for m in managers:
+            streak = 0
+            streak_type = None
+            for gw in range(current_gw, 0, -1):
+                scores = sorted(
+                    [(m2["player_name"], gw_history.get(m2["entry"], {}).get(gw, 0)) for m2 in managers],
+                    key=lambda x: -x[1]
+                )
+                my_pts = gw_history.get(m["entry"], {}).get(gw, 0)
+                if my_pts == 0:
+                    break
+                if my_pts == scores[0][1]:
+                    gw_result = "win"
+                elif my_pts == scores[-1][1]:
+                    gw_result = "loss"
+                else:
+                    gw_result = "mid"
+                if streak == 0:
+                    streak_type = gw_result
+                    streak = 1
+                elif gw_result == streak_type:
+                    streak += 1
+                else:
+                    break
+            label = "vinster" if streak_type == "win" else "förluster" if streak_type == "loss" else "mellanplaceringar"
+            result.append({"name": m["player_name"], "streak": streak, "type": streak_type, "desc": f"{streak} {label} i rad"})
+        return sorted(result, key=lambda x: -x["streak"])
+
+    def get_all_time_worst_gw(bottom_n=None):
+        n = bottom_n or 5
+        records = [{"name": m["player_name"], "gw": gw, "pts": gw_history.get(m["entry"], {}).get(gw, 0)}
+                   for gw in range(1, current_gw + 1) for m in managers
+                   if gw_history.get(m["entry"], {}).get(gw, 0) > 0]
+        return sorted(records, key=lambda x: x["pts"])[:n]
+
     def get_quarter_progression(quarter):
         f, t = QUARTERS.get(quarter, (1, current_gw))
         gws = range(f, min(t, current_gw) + 1)
@@ -591,6 +630,7 @@ def make_tool_fns(managers: list, gw_history: dict, current_gw: int) -> dict:
         "get_standings_at_gw": get_standings_at_gw, "get_head_to_head": get_head_to_head,
         "get_all_time_best_gw": get_all_time_best_gw, "get_overtake_gw": get_overtake_gw,
         "get_quarter_progression": get_quarter_progression,
+        "get_streaks": get_streaks, "get_all_time_worst_gw": get_all_time_worst_gw,
     }
 
 
@@ -607,6 +647,8 @@ def execute_tool(name: str, args: dict, tool_fns: dict):
         if name == "get_all_time_best_gw":  return tool_fns["get_all_time_best_gw"](args.get("top_n"))
         if name == "get_overtake_gw":          return tool_fns["get_overtake_gw"](args["manager1"], args["manager2"])
         if name == "get_quarter_progression":  return tool_fns["get_quarter_progression"](args["quarter"])
+        if name == "get_streaks":               return tool_fns["get_streaks"]()
+        if name == "get_all_time_worst_gw":     return tool_fns["get_all_time_worst_gw"](args.get("bottom_n"))
         return {"error": f"Unknown tool: {name}"}
     except Exception as e:
         return {"error": str(e)}
