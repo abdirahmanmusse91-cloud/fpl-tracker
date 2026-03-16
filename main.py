@@ -464,22 +464,32 @@ async def sync_all():
 
 # ── Chat: Groq/Llama function calling tools ──
 
+def _tool(name, desc, props=None, required=None):
+    return {"type": "function", "function": {
+        "name": name, "description": desc,
+        "parameters": {"type": "object", "properties": props or {},
+                       **({"required": required} if required else {})}}}
+
+_gw   = {"gw": {"type": "integer"}}
+_fqt  = {"from_gw": {"type": "integer"}, "to_gw": {"type": "integer"}, "quarter": {"type": "integer"}}
+_m12  = {"manager1": {"type": "string"}, "manager2": {"type": "string"}}
+
 GROQ_TOOLS = [
-    {"type": "function", "function": {"name": "get_standings", "description": "Aktuell ligatabell med ranking och totalpoäng för alla spelare", "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {"name": "get_gw_scores", "description": "Poäng för alla spelare i en specifik omgång", "parameters": {"type": "object", "properties": {"gw": {"type": "integer", "description": "Omgångsnummer 1-38"}}, "required": ["gw"]}}},
-    {"type": "function", "function": {"name": "get_range_scores", "description": "Sammanlagda poäng under ett GW-intervall", "parameters": {"type": "object", "properties": {"from_gw": {"type": "integer"}, "to_gw": {"type": "integer"}}, "required": ["from_gw", "to_gw"]}}},
-    {"type": "function", "function": {"name": "get_quarter_scores", "description": "Poäng för ett kvartal: 1=GW1-10, 2=GW11-20, 3=GW21-30, 4=GW31-38", "parameters": {"type": "object", "properties": {"quarter": {"type": "integer"}}, "required": ["quarter"]}}},
-    {"type": "function", "function": {"name": "get_consistency", "description": "Konsistensstatistik per spelare: snitt, stddev, min, max per GW", "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {"name": "get_gw_wins", "description": "Antal omgångsvinster per spelare (högst poäng i omgången)", "parameters": {"type": "object", "properties": {"manager_name": {"type": "string", "description": "Spelarnamn, utelämna för alla"}}}}},
-    {"type": "function", "function": {"name": "get_standings_at_gw", "description": "Ackumulerad ligatabell vid en specifik omgång", "parameters": {"type": "object", "properties": {"gw": {"type": "integer"}}, "required": ["gw"]}}},
-    {"type": "function", "function": {"name": "get_head_to_head", "description": "Head-to-head statistik mellan två spelare", "parameters": {"type": "object", "properties": {"manager1": {"type": "string"}, "manager2": {"type": "string"}}, "required": ["manager1", "manager2"]}}},
-    {"type": "function", "function": {"name": "get_all_time_best_gw", "description": "Bästa enskilda omgångsprestationerna under säsongen", "parameters": {"type": "object", "properties": {"top_n": {"type": "integer", "description": "Antal topp-prestationer (standard: 5)"}}}}},
-    {"type": "function", "function": {"name": "get_overtake_gw", "description": "Alla tillfällen då en spelare gick om en annan i ackumulerad poäng", "parameters": {"type": "object", "properties": {"manager1": {"type": "string"}, "manager2": {"type": "string"}}, "required": ["manager1", "manager2"]}}},
-    {"type": "function", "function": {"name": "get_quarter_progression", "description": "Löpande kvartalstabell GW för GW — visar vem som ledde efter varje omgång i kvartalet och hur ställningen förändrades", "parameters": {"type": "object", "properties": {"quarter": {"type": "integer", "description": "Kvartal 1-4"}}, "required": ["quarter"]}}},
-    {"type": "function", "function": {"name": "get_streaks", "description": "Nuvarande streak per spelare — antal omgångar i rad med vinst (högst poäng), förlust (lägst poäng) eller mellanplacering", "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {"name": "get_all_time_worst_gw", "description": "Sämsta enskilda omgångsprestationerna under säsongen (lägst poäng)", "parameters": {"type": "object", "properties": {"bottom_n": {"type": "integer", "description": "Antal sämsta prestationer (standard: 5)"}}}}},
-    {"type": "function", "function": {"name": "get_bench_points", "description": "Bänkpoäng per spelare — poäng som lämnades på bänken. Kan filtreras på kvartal eller GW-intervall.", "parameters": {"type": "object", "properties": {"from_gw": {"type": "integer"}, "to_gw": {"type": "integer"}, "quarter": {"type": "integer", "description": "Kvartal 1-4, utelämna för hela säsongen"}}}}},
-    {"type": "function", "function": {"name": "get_standings_with_bench", "description": "Justerad ligatabell om bänkpoäng räknades med — visar faktiska poäng + bänkpoäng + kombinerat per spelare", "parameters": {"type": "object", "properties": {"from_gw": {"type": "integer"}, "to_gw": {"type": "integer"}, "quarter": {"type": "integer", "description": "Kvartal 1-4, utelämna för hela säsongen"}}}}},
+    _tool("get_standings",          "Ligatabell: ranking och totalpoäng"),
+    _tool("get_gw_scores",          "Poäng per spelare i en omgång",              _gw, ["gw"]),
+    _tool("get_range_scores",       "Summa poäng GW-intervall",                   {"from_gw": {"type": "integer"}, "to_gw": {"type": "integer"}}, ["from_gw", "to_gw"]),
+    _tool("get_quarter_scores",     "Poäng kvartal 1-4",                          {"quarter": {"type": "integer"}}, ["quarter"]),
+    _tool("get_consistency",        "Snitt, stddev, min, max per spelare"),
+    _tool("get_gw_wins",            "Antal omgångsvinster per spelare",            {"manager_name": {"type": "string"}}),
+    _tool("get_standings_at_gw",    "Ackumulerad tabell vid given omgång",         _gw, ["gw"]),
+    _tool("get_head_to_head",       "Head-to-head mellan två spelare",            _m12, ["manager1", "manager2"]),
+    _tool("get_all_time_best_gw",   "Bästa enskilda omgångsprestationer",         {"top_n": {"type": "integer"}}),
+    _tool("get_overtake_gw",        "Omgångar då spelare gick om varandra",       _m12, ["manager1", "manager2"]),
+    _tool("get_quarter_progression","Kvartalstabell GW för GW",                   {"quarter": {"type": "integer"}}, ["quarter"]),
+    _tool("get_streaks",            "Nuvarande vinst/förlust-streak per spelare"),
+    _tool("get_all_time_worst_gw",  "Sämsta enskilda omgångsprestationer",        {"bottom_n": {"type": "integer"}}),
+    _tool("get_bench_points",       "Bänkpoäng per spelare, filter: kvartal/GW",  _fqt),
+    _tool("get_standings_with_bench","Tabell med bänkpoäng inräknade",            _fqt),
 ]
 
 
@@ -489,18 +499,18 @@ def make_tool_fns(managers: list, gw_history: dict, current_gw: int, bench_histo
         return next((m for m in managers if name.lower() in m["player_name"].lower()), None)
 
     def get_standings():
-        return [{"rank": i + 1, "name": m["player_name"], "team": m["entry_name"], "total": m["total"]}
+        return [{"rank": i + 1, "name": m["player_name"], "total": m["total"]}
                 for i, m in enumerate(managers)]
 
     def get_gw_scores(gw):
         return sorted(
-            [{"name": m["player_name"], "pts": gw_history.get(m["entry"], {}).get(gw, 0), "total": m["total"]}
+            [{"name": m["player_name"], "pts": gw_history.get(m["entry"], {}).get(gw, 0)}
              for m in managers], key=lambda x: -x["pts"])
 
     def get_range_scores(from_gw, to_gw):
         r = range(from_gw, min(to_gw, current_gw) + 1)
         return sorted(
-            [{"name": m["player_name"], "pts": sum(gw_history.get(m["entry"], {}).get(g, 0) for g in r), "total": m["total"]}
+            [{"name": m["player_name"], "pts": sum(gw_history.get(m["entry"], {}).get(g, 0) for g in r)}
              for m in managers], key=lambda x: -x["pts"])
 
     def get_quarter_scores(quarter):
@@ -516,7 +526,7 @@ def make_tool_fns(managers: list, gw_history: dict, current_gw: int, bench_histo
             avg = sum(scores) / len(scores)
             stddev = math.sqrt(sum((p - avg) ** 2 for p in scores) / len(scores))
             result.append({"name": m["player_name"], "avg": round(avg, 1), "stddev": round(stddev, 1),
-                           "min": min(scores), "max": max(scores), "total": m["total"]})
+                           "min": min(scores), "max": max(scores)})
         return sorted(result, key=lambda x: x["stddev"])
 
     def get_gw_wins(manager_name=None):
@@ -750,19 +760,16 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
     player_names = ", ".join(m["player_name"] for m in managers)
 
     system_prompt = (
-        f"Du är en FPL-assistent för mini-ligan 'Big Blinds' ({len(managers)} spelare, GW{current_gw}). "
-        f"Kvartal: K1=GW1-10, K2=GW11-20, K3=GW21-30, K4=GW31-38. "
-        f"Spelare: {player_names}. "
-        f"Svara ALLTID på svenska med emojis. Var kortfattad men fullständig. "
-        f"KRITISK REGEL: Använd ALLTID verktygen för exakt data. Uppfinn ALDRIG siffror. "
-        f"Om flera spelare uppfyller ett kriterium, nämn ALLTID alla. "
-        f"Räkna ALDRIG ut differenser eller summor själv — hämta alltid data via verktygen och låt siffrorna tala. "
-        f"Vid konsistensfrågor: nämn ALLTID både stddev OCH snittpoäng per spelare. "
-        f"Låg stddev + lågt snitt = konsekvent DÅLIG. Låg stddev + högt snitt = konsekvent BRA. Hög stddev + högt snitt = toppar och dalar men stark. Förklara alltid vad konsistensen innebär i praktiken."
+        f"FPL-assistent, liga 'Big Blinds' ({len(managers)} spelare, GW{current_gw}). "
+        f"K1=GW1-10,K2=GW11-20,K3=GW21-30,K4=GW31-38. Spelare: {player_names}. "
+        f"Svara på svenska med emojis. Kortfattad men fullständig. "
+        f"Använd ALLTID verktyg för data—uppfinn aldrig siffror. Nämn alla spelare som uppfyller kriteriet. "
+        f"Räkna inte differenser själv—hämta via verktyg. "
+        f"Konsistens: nämn alltid stddev+snitt. Låg stddev+lågt snitt=konsekvent dålig; låg+högt=bra; hög+högt=toppar/dalar."
     )
 
     messages = [{"role": "system", "content": system_prompt}]
-    for msg in history[-10:]:
+    for msg in history[-6:]:
         role = msg.get("role")
         if role in ("user", "assistant"):
             messages.append({"role": role, "content": msg.get("content", "")})
@@ -821,8 +828,6 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
                                   {"question": user_message[:100]})
         return {"error": "empty", "message": AI_ERROR_MESSAGES["empty"]}
 
-    background_tasks.add_task(sb_save_chat, session_id, "user", user_message)
-    background_tasks.add_task(sb_save_chat, session_id, "assistant", answer)
     background_tasks.add_task(sb_log, "info", "Chat OK", "/api/chat", 200, ms,
                               {"question": user_message[:100]})
 

@@ -319,15 +319,6 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 const LEAGUE_ID = 1076120;
 const QUARTERS = {1:[1,10], 2:[11,20], 3:[21,30], 4:[31,38]};
 
-// Persistent session ID for chat history
-const SESSION_ID = (() => {
-  let id = localStorage.getItem('fpl_session_id');
-  if (!id) {
-    id = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
-    localStorage.setItem('fpl_session_id', id);
-  }
-  return id;
-})();
 
 let managers = [], gwHistory = {}, benchHistory = {}, currentGW = 1, selectedGW = 1, dataLoaded = false, isLive = false;
 let pollTimer = null, lastRefreshed = 0, tsTimer = null;
@@ -369,7 +360,6 @@ async function init() {
     updateTimestamp();
     if (!tsTimer) tsTimer = setInterval(updateTimestamp, 60000);
     startPolling(isLive);
-    loadChatHistory();
   } catch(e) {
     document.getElementById('loading').classList.add('hidden');
     const eb = document.getElementById('error-box');
@@ -552,8 +542,7 @@ async function callAI(userMessage) {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         user_message: userMessage,
-        history: chatHistory.slice(-10),
-        session_id: SESSION_ID,
+        history: chatHistory.slice(-6),
         league_id: LEAGUE_ID,
       })
     });
@@ -565,19 +554,6 @@ async function callAI(userMessage) {
     console.error('[AI] fetch exception:', e);
     return {error: 'network', message: AI_ERRORS.network};
   }
-}
-
-async function loadChatHistory() {
-  try {
-    const d = await get(`/api/chat/history/${SESSION_ID}`);
-    if (d.messages && d.messages.length > 0) {
-      document.getElementById('suggestions').style.display = 'none';
-      d.messages.forEach(msg => {
-        appendMsg(msg.content, msg.role === 'user' ? 'user' : 'ai');
-        chatHistory.push({role: msg.role === 'assistant' ? 'assistant' : msg.role, content: msg.content});
-      });
-    }
-  } catch(e) { /* silent */ }
 }
 
 async function sendMessage(text) {
