@@ -572,12 +572,12 @@ def execute_tool(name: str, args: dict, tool_fns: dict):
 # ── Chat endpoint ──
 
 AI_ERROR_MESSAGES = {
-    "rate_limit": "Systemet vilar – försök igen om en stund. ⏳",
-    "empty":      "Hittade ingen statistik för det du frågade om. 📊",
+    "rate_limit":  "För många frågor på kort tid – vänta 30 sekunder och försök igen. ⏳",
+    "empty":       "Kunde inte svara på det – försök omformulera frågan. 🤔",
     "bad_request": "Jag förstod inte helt. Fråga gärna om poäng, tabell eller spelare! 🤔",
-    "blocked":    "Frågan kunde inte besvaras. Försök omformulera den. 🙏",
-    "config":     "AI-tjänsten är inte konfigurerad. Kontakta administratören. ⚙️",
-    "api_error":  "Tillfälligt fel, försök igen om en stund. 🔧",
+    "blocked":     "Den frågan kan jag inte svara på – håll dig till liga och statistik. ⚽",
+    "config":      "AI-tjänsten är inte konfigurerad. Kontakta administratören. ⚙️",
+    "api_error":   "Tjänsten är tillfälligt otillgänglig – försök igen om en stund. 🔧",
 }
 
 
