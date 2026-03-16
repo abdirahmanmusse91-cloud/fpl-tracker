@@ -572,7 +572,7 @@ def execute_tool(name: str, args: dict, tool_fns: dict):
 # ── Chat endpoint ──
 
 AI_ERROR_MESSAGES = {
-    "rate_limit":  "För många frågor på kort tid – vänta 30 sekunder och försök igen. ⏳",
+    "rate_limit":  "För många frågor på kort tid – vänta en minut och försök igen. ⏳",
     "empty":       "Kunde inte svara på det – försök omformulera frågan. 🤔",
     "bad_request": "Jag förstod inte helt. Fråga gärna om poäng, tabell eller spelare! 🤔",
     "blocked":     "Den frågan kan jag inte svara på – håll dig till liga och statistik. ⚽",
