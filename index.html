@@ -263,6 +263,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
               <button class="bar-toggle-btn active" id="toggle-gw" onclick="setBarMode('gw')">GW</button>
               <button class="bar-toggle-btn" id="toggle-total" onclick="setBarMode('total')">TOTAL</button>
               <button class="bar-toggle-btn" id="toggle-quarter" onclick="setBarMode('quarter')">KVARTAL</button>
+              <button class="bar-toggle-btn" id="toggle-bench" onclick="setBarMode('bench')">BÄNK</button>
             </div>
             <div class="table-tag" id="gw-selected-label">GW —</div>
           </div>
@@ -328,7 +329,7 @@ const SESSION_ID = (() => {
   return id;
 })();
 
-let managers = [], gwHistory = {}, currentGW = 1, selectedGW = 1, dataLoaded = false, isLive = false;
+let managers = [], gwHistory = {}, benchHistory = {}, currentGW = 1, selectedGW = 1, dataLoaded = false, isLive = false;
 let pollTimer = null, lastRefreshed = 0, tsTimer = null;
 
 async function get(path) {
@@ -348,12 +349,13 @@ function parseGwHistory(raw) {
 async function init() {
   try {
     const data = await get(`/api/dashboard/${LEAGUE_ID}`);
-    managers  = data.managers;
-    currentGW = data.current_gw;
-    isLive    = data.is_live || false;
-    gwHistory = parseGwHistory(data.gw_history);
-    selectedGW = currentGW;
-    dataLoaded = true;
+    managers     = data.managers;
+    currentGW    = data.current_gw;
+    isLive       = data.is_live || false;
+    gwHistory    = parseGwHistory(data.gw_history);
+    benchHistory = parseGwHistory(data.bench_history || {});
+    selectedGW   = currentGW;
+    dataLoaded   = true;
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('dashboard').classList.remove('hidden');
     document.getElementById('send-btn').disabled = false;
@@ -379,11 +381,12 @@ async function init() {
 async function refreshData() {
   try {
     const data = await get(`/api/dashboard/${LEAGUE_ID}`);
-    managers  = data.managers;
-    currentGW = data.current_gw;
-    isLive    = data.is_live || false;
-    gwHistory = parseGwHistory(data.gw_history);
-    selectedGW = currentGW;
+    managers     = data.managers;
+    currentGW    = data.current_gw;
+    isLive       = data.is_live || false;
+    gwHistory    = parseGwHistory(data.gw_history);
+    benchHistory = parseGwHistory(data.bench_history || {});
+    selectedGW   = currentGW;
     updateLiveBadge(isLive);
     checkLeaderChange(managers[0]?.player_name);
     lastRefreshed = Date.now();
@@ -458,6 +461,7 @@ function setBarMode(mode) {
   document.getElementById('toggle-gw').classList.toggle('active', mode==='gw');
   document.getElementById('toggle-total').classList.toggle('active', mode==='total');
   document.getElementById('toggle-quarter').classList.toggle('active', mode==='quarter');
+  document.getElementById('toggle-bench').classList.toggle('active', mode==='bench');
   renderBars(selectedGW);
 }
 
@@ -489,6 +493,22 @@ function renderBars(gw) {
         <div class="bar-pts">${s.q_pts}</div>
         <div class="bar-total">${s.gw_pts} gw</div></div>`).join('');
     }
+    return;
+  }
+
+  if (barMode === 'bench') {
+    const data = managers.map(m => ({
+      name: m.player_name,
+      bench_pts: Array.from({length: gw}, (_, i) => i + 1).reduce((s, g) => s + (benchHistory[m.entry]?.[g] || 0), 0),
+      actual_pts: Array.from({length: gw}, (_, i) => i + 1).reduce((s, g) => s + (gwHistory[m.entry]?.[g] || 0), 0),
+    })).sort((a, b) => b.bench_pts - a.bench_pts);
+    const max = Math.max(...data.map(d => d.bench_pts), 1);
+    document.getElementById('gw-selected-label').textContent = `BÄNK GW1–${gw}`;
+    document.getElementById('gw-bars').innerHTML = data.map((s, i) => `
+      <div class="bar-row"><div class="bar-name" title="${s.name}">${s.name}</div>
+      <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s.bench_pts/max*100).toFixed(1)}%"></div></div>
+      <div class="bar-pts">${s.bench_pts}</div>
+      <div class="bar-total">${s.actual_pts} tot</div></div>`).join('');
     return;
   }
 

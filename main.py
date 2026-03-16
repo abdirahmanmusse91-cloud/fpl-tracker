@@ -111,8 +111,9 @@ async def sb_read(entry_id: int) -> dict[int, int]:
     return {}
 
 
-async def sb_read_all(entry_ids: list[int]) -> tuple[dict, dict]:
+async def sb_read_all(entry_ids: list[int]) -> tuple[dict, dict, dict]:
     gw_history: dict[int, dict[int, int]] = {eid: {} for eid in entry_ids}
+    bench_history: dict[int, dict[int, int]] = {eid: {} for eid in entry_ids}
     synced_at_map: dict[int, dict[int, datetime]] = {eid: {} for eid in entry_ids}
     try:
         async with httpx.AsyncClient(timeout=10) as c:
@@ -121,13 +122,14 @@ async def sb_read_all(entry_ids: list[int]) -> tuple[dict, dict]:
                 headers=SB_HEADERS,
                 params={
                     "entry_id": f"in.({','.join(str(e) for e in entry_ids)})",
-                    "select": "entry_id,gw,points,synced_at",
+                    "select": "entry_id,gw,points,points_on_bench,synced_at",
                 },
             )
         if r.status_code == 200:
             for row in r.json():
                 eid = row["entry_id"]
                 gw_history[eid][row["gw"]] = row["points"]
+                bench_history[eid][row["gw"]] = row.get("points_on_bench") or 0
                 raw_ts = row.get("synced_at")
                 if raw_ts:
                     try:
@@ -136,14 +138,16 @@ async def sb_read_all(entry_ids: list[int]) -> tuple[dict, dict]:
                         pass
     except Exception:
         pass
-    return gw_history, synced_at_map
+    return gw_history, synced_at_map, bench_history
 
 
-async def sb_write(entry_id: int, data: dict[int, int]) -> None:
+async def sb_write(entry_id: int, data: dict[int, int], bench_data: dict[int, int] = None) -> None:
     if not data:
         return
     now = datetime.now(timezone.utc).isoformat()
-    rows = [{"entry_id": entry_id, "gw": gw, "points": pts, "synced_at": now} for gw, pts in data.items()]
+    rows = [{"entry_id": entry_id, "gw": gw, "points": pts,
+             "points_on_bench": (bench_data or {}).get(gw, 0), "synced_at": now}
+            for gw, pts in data.items()]
     try:
         async with httpx.AsyncClient(timeout=8) as c:
             await c.post(
@@ -307,7 +311,7 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
         managers = league_r.json()["standings"]["results"]
 
     entry_ids = [m["entry"] for m in managers]
-    gw_history, synced_at_map = await sb_read_all(entry_ids)
+    gw_history, synced_at_map, bench_history = await sb_read_all(entry_ids)
 
     now = datetime.now(timezone.utc)
     needs_current: list[int] = []
@@ -325,6 +329,7 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
 
     if entries_to_fetch:
         to_cache: dict[int, dict[int, int]] = {}
+        bench_to_cache: dict[int, dict[int, int]] = {}
 
         async def fetch_entry(entry_id: int):
             try:
@@ -332,23 +337,30 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
                     r = await c.get(f"{FPL_BASE}/entry/{entry_id}/history/", headers=FPL_HEADERS)
                     data = r.json()
                 new_data: dict[int, int] = {}
+                new_bench: dict[int, int] = {}
                 for gw_row in data.get("current", []):
                     gw_num = gw_row["event"]
                     pts = gw_row["points"] - (gw_row.get("event_transfers_cost") or 0)
+                    bench = gw_row.get("points_on_bench") or 0
                     if gw_num == current_gw and entry_id in needs_current:
                         gw_history[entry_id][current_gw] = pts
+                        bench_history[entry_id][current_gw] = bench
                         new_data[current_gw] = pts
+                        new_bench[current_gw] = bench
                     elif gw_num in needs_historical.get(entry_id, set()):
                         gw_history[entry_id][gw_num] = pts
+                        bench_history[entry_id][gw_num] = bench
                         new_data[gw_num] = pts
+                        new_bench[gw_num] = bench
                 if new_data:
                     to_cache[entry_id] = new_data
+                    bench_to_cache[entry_id] = new_bench
             except Exception:
                 pass
 
         await asyncio.gather(*[fetch_entry(eid) for eid in entries_to_fetch])
         for eid, data in to_cache.items():
-            background_tasks.add_task(sb_write, eid, data)
+            background_tasks.add_task(sb_write, eid, data, bench_to_cache.get(eid))
 
     background_tasks.add_task(sb_upsert_managers, managers)
     background_tasks.add_task(sb_update_league_state, league_id, current_gw, live, managers)
@@ -356,6 +368,7 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
     return {
         "managers": managers,
         "gw_history": gw_history,
+        "bench_history": bench_history,
         "current_gw": current_gw,
         "is_live": live,
     }
@@ -465,10 +478,13 @@ GROQ_TOOLS = [
     {"type": "function", "function": {"name": "get_quarter_progression", "description": "Löpande kvartalstabell GW för GW — visar vem som ledde efter varje omgång i kvartalet och hur ställningen förändrades", "parameters": {"type": "object", "properties": {"quarter": {"type": "integer", "description": "Kvartal 1-4"}}, "required": ["quarter"]}}},
     {"type": "function", "function": {"name": "get_streaks", "description": "Nuvarande streak per spelare — antal omgångar i rad med vinst (högst poäng), förlust (lägst poäng) eller mellanplacering", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "get_all_time_worst_gw", "description": "Sämsta enskilda omgångsprestationerna under säsongen (lägst poäng)", "parameters": {"type": "object", "properties": {"bottom_n": {"type": "integer", "description": "Antal sämsta prestationer (standard: 5)"}}}}},
+    {"type": "function", "function": {"name": "get_bench_points", "description": "Bänkpoäng per spelare — poäng som lämnades på bänken. Kan filtreras på kvartal eller GW-intervall.", "parameters": {"type": "object", "properties": {"from_gw": {"type": "integer"}, "to_gw": {"type": "integer"}, "quarter": {"type": "integer", "description": "Kvartal 1-4, utelämna för hela säsongen"}}}}},
+    {"type": "function", "function": {"name": "get_standings_with_bench", "description": "Justerad ligatabell om bänkpoäng räknades med — visar faktiska poäng + bänkpoäng + kombinerat per spelare", "parameters": {"type": "object", "properties": {"from_gw": {"type": "integer"}, "to_gw": {"type": "integer"}, "quarter": {"type": "integer", "description": "Kvartal 1-4, utelämna för hela säsongen"}}}}},
 ]
 
 
-def make_tool_fns(managers: list, gw_history: dict, current_gw: int) -> dict:
+def make_tool_fns(managers: list, gw_history: dict, current_gw: int, bench_history: dict = None) -> dict:
+    bench_history = bench_history or {}
     def _entry(name):
         return next((m for m in managers if name.lower() in m["player_name"].lower()), None)
 
@@ -603,6 +619,35 @@ def make_tool_fns(managers: list, gw_history: dict, current_gw: int) -> dict:
                    if gw_history.get(m["entry"], {}).get(gw, 0) > 0]
         return sorted(records, key=lambda x: x["pts"])[:n]
 
+    def get_bench_points(from_gw=None, to_gw=None, quarter=None):
+        if quarter:
+            f, t = QUARTERS.get(quarter, (1, current_gw))
+        else:
+            f, t = from_gw or 1, to_gw or current_gw
+        r = range(f, min(t, current_gw) + 1)
+        result = [
+            {"name": m["player_name"],
+             "bench_pts": sum(bench_history.get(m["entry"], {}).get(g, 0) for g in r),
+             "actual_pts": sum(gw_history.get(m["entry"], {}).get(g, 0) for g in r)}
+            for m in managers
+        ]
+        return sorted(result, key=lambda x: -x["bench_pts"])
+
+    def get_standings_with_bench(from_gw=None, to_gw=None, quarter=None):
+        if quarter:
+            f, t = QUARTERS.get(quarter, (1, current_gw))
+        else:
+            f, t = from_gw or 1, to_gw or current_gw
+        r = range(f, min(t, current_gw) + 1)
+        result = []
+        for m in managers:
+            actual = sum(gw_history.get(m["entry"], {}).get(g, 0) for g in r)
+            bench = sum(bench_history.get(m["entry"], {}).get(g, 0) for g in r)
+            result.append({"name": m["player_name"], "actual_pts": actual,
+                           "bench_pts": bench, "combined_pts": actual + bench})
+        return [{"rank": i + 1, **m} for i, m in
+                enumerate(sorted(result, key=lambda x: -x["combined_pts"]))]
+
     def get_quarter_progression(quarter):
         f, t = QUARTERS.get(quarter, (1, current_gw))
         gws = range(f, min(t, current_gw) + 1)
@@ -631,6 +676,7 @@ def make_tool_fns(managers: list, gw_history: dict, current_gw: int) -> dict:
         "get_all_time_best_gw": get_all_time_best_gw, "get_overtake_gw": get_overtake_gw,
         "get_quarter_progression": get_quarter_progression,
         "get_streaks": get_streaks, "get_all_time_worst_gw": get_all_time_worst_gw,
+        "get_bench_points": get_bench_points, "get_standings_with_bench": get_standings_with_bench,
     }
 
 
@@ -649,6 +695,8 @@ def execute_tool(name: str, args: dict, tool_fns: dict):
         if name == "get_quarter_progression":  return tool_fns["get_quarter_progression"](args["quarter"])
         if name == "get_streaks":               return tool_fns["get_streaks"]()
         if name == "get_all_time_worst_gw":     return tool_fns["get_all_time_worst_gw"](args.get("bottom_n"))
+        if name == "get_bench_points":          return tool_fns["get_bench_points"](args.get("from_gw"), args.get("to_gw"), args.get("quarter"))
+        if name == "get_standings_with_bench":  return tool_fns["get_standings_with_bench"](args.get("from_gw"), args.get("to_gw"), args.get("quarter"))
         return {"error": f"Unknown tool: {name}"}
     except Exception as e:
         return {"error": str(e)}
@@ -692,12 +740,12 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
             return {"error": "api_error", "message": "Kunde inte hämta ligadata. Försök igen. 🔧"}
 
     entry_ids = [m["entry"] for m in managers]
-    gw_history, _ = await sb_read_all(entry_ids)
+    gw_history, _, bench_history = await sb_read_all(entry_ids)
 
     state = await sb_get_league_state(league_id)
     current_gw = state["current_gw"] if state else 1
 
-    tool_fns = make_tool_fns(managers, gw_history, current_gw)
+    tool_fns = make_tool_fns(managers, gw_history, current_gw, bench_history)
     player_names = ", ".join(m["player_name"] for m in managers)
 
     system_prompt = (
