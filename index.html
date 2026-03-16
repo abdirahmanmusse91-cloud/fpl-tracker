@@ -2,7 +2,7 @@
 <html lang="sv">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>FPL Liga Tracker</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -169,7 +169,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 /* FAB chat button - mobile only */
 .chat-fab {
   display:none;
-  position:fixed; bottom:24px; right:24px; z-index:300;
+  position:fixed; bottom:calc(80px + env(safe-area-inset-bottom)); right:24px; z-index:300;
   width:56px; height:56px; border-radius:50%;
   background:linear-gradient(135deg,var(--g),var(--g2));
   border:none; cursor:pointer;
@@ -195,7 +195,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 @keyframes livepulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
 
 /* Toast */
-.toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%) translateY(20px); background:linear-gradient(135deg,var(--g),var(--g2)); color:#000; padding:12px 20px; border-radius:8px; font-weight:600; font-size:0.85rem; box-shadow:0 4px 20px rgba(0,255,135,0.4); z-index:1000; opacity:0; transition:all 0.3s; pointer-events:none; white-space:nowrap; }
+.toast { position:fixed; bottom:calc(152px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%) translateY(20px); background:linear-gradient(135deg,var(--g),var(--g2)); color:#000; padding:12px 20px; border-radius:8px; font-weight:600; font-size:0.85rem; box-shadow:0 4px 20px rgba(0,255,135,0.4); z-index:1000; opacity:0; transition:all 0.3s; pointer-events:none; white-space:nowrap; }
 .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 
 /* Notification form */
