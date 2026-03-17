@@ -321,7 +321,7 @@ const QUARTERS = {1:[1,10], 2:[11,20], 3:[21,30], 4:[31,38]};
 
 
 let managers = [], gwHistory = {}, benchHistory = {}, currentGW = 1, selectedGW = 1, dataLoaded = false, isLive = false;
-let pollTimer = null, lastRefreshed = 0, tsTimer = null;
+let pollTimer = null, lastRefreshed = 0;
 
 async function get(path) {
   const r = await fetch(path);
@@ -359,7 +359,6 @@ async function init() {
     render();
     updateSuggestions();
     updateTimestamp();
-    if (!tsTimer) tsTimer = setInterval(updateTimestamp, 60000);
     startPolling(isLive);
   } catch(e) {
     document.getElementById('loading').classList.add('hidden');
