@@ -347,6 +347,7 @@ async function init() {
     benchHistory = parseGwHistory(data.bench_history || {});
     selectedGW   = currentGW;
     dataLoaded   = true;
+    lastRefreshed = data.last_synced ? new Date(data.last_synced).getTime() : Date.now();
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('dashboard').classList.remove('hidden');
     document.getElementById('send-btn').disabled = false;
@@ -377,6 +378,7 @@ async function refreshData() {
     gwHistory    = parseGwHistory(data.gw_history);
     benchHistory = parseGwHistory(data.bench_history || {});
     selectedGW   = currentGW;
+    lastRefreshed = data.last_synced ? new Date(data.last_synced).getTime() : Date.now();
     updateLiveBadge(isLive);
     checkLeaderChange(managers[0]?.player_name);
     lastRefreshed = Date.now();
@@ -487,18 +489,22 @@ function renderBars(gw) {
   }
 
   if (barMode === 'bench') {
+    const q = getQuarterForGW(gw);
+    const qRange = q ? Array.from({length: gw - q.from + 1}, (_, i) => q.from + i) : [gw];
+    const allGWs = Array.from({length: gw}, (_, i) => i + 1);
     const data = managers.map(m => ({
       name: m.player_name,
-      bench_pts: Array.from({length: gw}, (_, i) => i + 1).reduce((s, g) => s + (benchHistory[m.entry]?.[g] || 0), 0),
-      actual_pts: Array.from({length: gw}, (_, i) => i + 1).reduce((s, g) => s + (gwHistory[m.entry]?.[g] || 0), 0),
-    })).sort((a, b) => b.bench_pts - a.bench_pts);
-    const max = Math.max(...data.map(d => d.bench_pts), 1);
-    document.getElementById('gw-selected-label').textContent = `BÄNK GW1–${gw}`;
+      gw_bench:    benchHistory[m.entry]?.[gw] || 0,
+      q_bench:     qRange.reduce((s, g) => s + (benchHistory[m.entry]?.[g] || 0), 0),
+      total_bench: allGWs.reduce((s, g) => s + (benchHistory[m.entry]?.[g] || 0), 0),
+    })).sort((a, b) => b.gw_bench - a.gw_bench);
+    const max = Math.max(...data.map(d => d.gw_bench), 1);
+    document.getElementById('gw-selected-label').textContent = `BÄNK GW${gw}`;
     document.getElementById('gw-bars').innerHTML = data.map((s, i) => `
       <div class="bar-row"><div class="bar-name" title="${s.name}">${s.name}</div>
-      <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s.bench_pts/max*100).toFixed(1)}%"></div></div>
-      <div class="bar-pts">${s.bench_pts}</div>
-      <div class="bar-total">${s.actual_pts} tot</div></div>`).join('');
+      <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s.gw_bench/max*100).toFixed(1)}%"></div></div>
+      <div class="bar-pts">${s.gw_bench}</div>
+      <div class="bar-total" style="width:80px">${q?`K${q.num}:${s.q_bench} `:''}<span style="color:var(--muted)">Tot:${s.total_bench}</span></div></div>`).join('');
     return;
   }
 

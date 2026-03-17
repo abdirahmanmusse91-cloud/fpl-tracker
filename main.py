@@ -365,12 +365,21 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
     background_tasks.add_task(sb_upsert_managers, managers)
     background_tasks.add_task(sb_update_league_state, league_id, current_gw, live, managers)
 
+    # Most recent sync time for current GW across all entries
+    sync_times = [
+        synced_at_map[eid][current_gw]
+        for eid in entry_ids
+        if current_gw in synced_at_map.get(eid, {})
+    ]
+    last_synced = max(sync_times).isoformat() if sync_times else None
+
     return {
         "managers": managers,
         "gw_history": gw_history,
         "bench_history": bench_history,
         "current_gw": current_gw,
         "is_live": live,
+        "last_synced": last_synced,
     }
 
 
