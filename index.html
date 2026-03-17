@@ -503,7 +503,10 @@ function renderBars(gw) {
       <div class="bar-row"><div class="bar-name" title="${s.name}">${s.name}</div>
       <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s.gw_bench/max*100).toFixed(1)}%"></div></div>
       <div class="bar-pts">${s.gw_bench}</div>
-      <div class="bar-total" style="width:80px">${q?`K${q.num}:${s.q_bench} `:''}<span style="color:var(--muted)">Tot:${s.total_bench}</span></div></div>`).join('');
+      <div style="display:flex;gap:6px;flex-shrink:0;font-size:0.72rem;font-family:'IBM Plex Mono',monospace;">
+        ${q?`<span style="color:var(--g)">K${q.num}:${s.q_bench}</span>`:''}
+        <span style="color:var(--muted2)">Tot:${s.total_bench}</span>
+      </div></div>`).join('');
     return;
   }
 
