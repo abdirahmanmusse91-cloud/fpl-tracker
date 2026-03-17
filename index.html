@@ -212,7 +212,6 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .bar-toggle-btn.active { background:var(--g); color:#000; border-color:var(--g); font-weight:600; }
 
 /* Updated timestamp */
-.updated-ts { font-size:0.58rem; color:var(--muted); letter-spacing:1px; font-family:'IBM Plex Mono',monospace; text-align:right; margin-top:-10px; margin-bottom:16px; }
 </style>
 </head>
 <body>
@@ -246,8 +245,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
         <div class="stat"><div class="stat-label">Ledare</div><div class="stat-val" id="s-leader-pts" style="font-size:1.4rem">—</div><div class="stat-hint" id="s-leader-name">—</div></div>
         <div class="stat"><div class="stat-label">Bäst denna GW</div><div class="stat-val" id="s-top-gw">—</div><div class="stat-hint" id="s-top-gw-name">—</div></div>
       </div>
-      <div class="updated-ts" id="updated-ts"></div>
-      <div class="sec">Topp 3</div>
+<div class="sec">Topp 3</div>
       <div class="podium" id="podium"></div>
       <div class="sec">Ligatabell</div>
       <div class="table-card">
@@ -321,7 +319,7 @@ const QUARTERS = {1:[1,10], 2:[11,20], 3:[21,30], 4:[31,38]};
 
 
 let managers = [], gwHistory = {}, benchHistory = {}, currentGW = 1, selectedGW = 1, dataLoaded = false, isLive = false;
-let pollTimer = null, lastRefreshed = 0;
+let pollTimer = null;
 
 async function get(path) {
   const r = await fetch(path);
@@ -347,7 +345,6 @@ async function init() {
     benchHistory = parseGwHistory(data.bench_history || {});
     selectedGW   = currentGW;
     dataLoaded   = true;
-    lastRefreshed = data.last_synced ? new Date(data.last_synced).getTime() : Date.now();
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('dashboard').classList.remove('hidden');
     document.getElementById('send-btn').disabled = false;
@@ -355,10 +352,8 @@ async function init() {
     document.getElementById('gw-pill').classList.remove('hidden');
     updateLiveBadge(isLive);
     checkLeaderChange(managers[0]?.player_name);
-    lastRefreshed = Date.now();
     render();
     updateSuggestions();
-    updateTimestamp();
     startPolling(isLive);
   } catch(e) {
     document.getElementById('loading').classList.add('hidden');
@@ -377,12 +372,9 @@ async function refreshData() {
     gwHistory    = parseGwHistory(data.gw_history);
     benchHistory = parseGwHistory(data.bench_history || {});
     selectedGW   = currentGW;
-    lastRefreshed = data.last_synced ? new Date(data.last_synced).getTime() : Date.now();
     updateLiveBadge(isLive);
     checkLeaderChange(managers[0]?.player_name);
-    lastRefreshed = Date.now();
     render();
-    updateTimestamp();
   } catch(e) { /* silent */ }
   startPolling(isLive);
 }
@@ -685,18 +677,6 @@ function updateSuggestions() {
   sugEl.innerHTML = texts.map(t => `<button class="suggest-btn" onclick="askSuggestion(this)">${t}</button>`).join('');
 }
 
-function updateTimestamp() {
-  const el = document.getElementById('updated-ts');
-  if (!el || !lastRefreshed) return;
-  const d = new Date(lastRefreshed);
-  const days = ['sön','mån','tis','ons','tor','fre','lör'];
-  const months = ['jan','feb','mar','apr','maj','jun','jul','aug','sep','okt','nov','dec'];
-  const day = days[d.getDay()];
-  const date = d.getDate();
-  const mon = months[d.getMonth()];
-  const time = d.toLocaleTimeString('sv-SE', {hour:'2-digit', minute:'2-digit'});
-  el.textContent = `Senast från FPL: ${day} ${date} ${mon} ${time}`;
-}
 
 function toggleChat() {
   const sidebar = document.querySelector('.sidebar');
