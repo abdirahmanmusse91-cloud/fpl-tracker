@@ -658,8 +658,14 @@ function updateSuggestions() {
 function updateTimestamp() {
   const el = document.getElementById('updated-ts');
   if (!el || !lastRefreshed) return;
-  const mins = Math.floor((Date.now() - lastRefreshed) / 60000);
-  el.textContent = mins < 1 ? 'Uppdaterat: just nu' : `Uppdaterat: ${mins} min sedan`;
+  const d = new Date(lastRefreshed);
+  const days = ['sön','mån','tis','ons','tor','fre','lör'];
+  const months = ['jan','feb','mar','apr','maj','jun','jul','aug','sep','okt','nov','dec'];
+  const day = days[d.getDay()];
+  const date = d.getDate();
+  const mon = months[d.getMonth()];
+  const time = d.toLocaleTimeString('sv-SE', {hour:'2-digit', minute:'2-digit'});
+  el.textContent = `Senast från FPL: ${day} ${date} ${mon} ${time}`;
 }
 
 function toggleChat() {
