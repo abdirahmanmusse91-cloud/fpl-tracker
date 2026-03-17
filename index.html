@@ -445,14 +445,20 @@ function render() {
   renderBars(currentGW);
 }
 
-let barMode = 'gw';
+let barMode = 'gw', benchSort = 'gw';
 
 function setBarMode(mode) {
   barMode = mode;
+  benchSort = 'gw';
   document.getElementById('toggle-gw').classList.toggle('active', mode==='gw');
   document.getElementById('toggle-total').classList.toggle('active', mode==='total');
   document.getElementById('toggle-quarter').classList.toggle('active', mode==='quarter');
   document.getElementById('toggle-bench').classList.toggle('active', mode==='bench');
+  renderBars(selectedGW);
+}
+
+function setBenchSort(sort) {
+  benchSort = sort;
   renderBars(selectedGW);
 }
 
@@ -491,22 +497,44 @@ function renderBars(gw) {
     const q = getQuarterForGW(gw);
     const qRange = q ? Array.from({length: gw - q.from + 1}, (_, i) => q.from + i) : [gw];
     const allGWs = Array.from({length: gw}, (_, i) => i + 1);
-    const data = managers.map(m => ({
-      name: m.player_name,
+    const rows = managers.map(m => ({
+      name:        m.player_name,
       gw_bench:    benchHistory[m.entry]?.[gw] || 0,
       q_bench:     qRange.reduce((s, g) => s + (benchHistory[m.entry]?.[g] || 0), 0),
       total_bench: allGWs.reduce((s, g) => s + (benchHistory[m.entry]?.[g] || 0), 0),
-    })).sort((a, b) => b.gw_bench - a.gw_bench);
-    const max = Math.max(...data.map(d => d.gw_bench), 1);
-    document.getElementById('gw-selected-label').textContent = `BÄNK GW${gw}`;
-    document.getElementById('gw-bars').innerHTML = data.map((s, i) => `
-      <div class="bar-row"><div class="bar-name" title="${s.name}">${s.name}</div>
-      <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s.gw_bench/max*100).toFixed(1)}%"></div></div>
-      <div class="bar-pts">${s.gw_bench}</div>
-      <div style="display:flex;gap:6px;flex-shrink:0;font-size:0.72rem;font-family:'IBM Plex Mono',monospace;">
-        ${q?`<span style="color:var(--g)">K${q.num}:${s.q_bench}</span>`:''}
-        <span style="color:var(--muted2)">Tot:${s.total_bench}</span>
-      </div></div>`).join('');
+    }));
+    const sortKey = benchSort === 'quarter' ? 'q_bench' : benchSort === 'total' ? 'total_bench' : 'gw_bench';
+    const data = rows.sort((a, b) => b[sortKey] - a[sortKey]);
+    const max = Math.max(...data.map(d => d[sortKey]), 1);
+
+    const gwLabel   = `GW${gw}`;
+    const qLabel    = q ? `K${q.num}` : '';
+    const gwActive  = benchSort === 'gw';
+    const qActive   = benchSort === 'quarter';
+    const totActive = benchSort === 'total';
+    const hStyle    = (active) => `cursor:pointer;font-size:0.65rem;font-family:'IBM Plex Mono',monospace;letter-spacing:1px;color:${active?'var(--g)':'var(--muted2)'};border-bottom:1px solid ${active?'var(--g)':'transparent'};padding-bottom:1px;`;
+
+    document.getElementById('gw-selected-label').textContent = `BÄNK ${gwLabel}`;
+    document.getElementById('gw-bars').innerHTML =
+      `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;padding:0 2px;">
+        <div style="width:110px;flex-shrink:0"></div>
+        <div style="flex:1"></div>
+        <div style="${hStyle(gwActive)}width:32px;text-align:right;" onclick="setBenchSort('gw')">${gwActive?'↓ ':''}<span>GW</span></div>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          ${q?`<span style="${hStyle(qActive)}" onclick="setBenchSort('quarter')">${qActive?'↓ ':''}${qLabel}</span>`:''}
+          <span style="${hStyle(totActive)}" onclick="setBenchSort('total')">${totActive?'↓ ':''}Tot</span>
+        </div>
+      </div>` +
+      data.map((s, i) => `
+      <div class="bar-row">
+        <div class="bar-name" title="${s.name}">${s.name}</div>
+        <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s[sortKey]/max*100).toFixed(1)}%"></div></div>
+        <div class="bar-pts" style="color:${gwActive?'var(--text)':'var(--muted2)'}">${s.gw_bench}</div>
+        <div style="display:flex;gap:6px;flex-shrink:0;font-family:'IBM Plex Mono',monospace;">
+          ${q?`<span style="font-size:0.75rem;color:${qActive?'var(--g)':'var(--muted2)'};font-weight:${qActive?'600':'400'}">${s.q_bench}</span>`:''}
+          <span style="font-size:0.72rem;color:${totActive?'var(--g)':'var(--muted2)'};font-weight:${totActive?'600':'400'}">${s.total_bench}</span>
+        </div>
+      </div>`).join('');
     return;
   }
 
