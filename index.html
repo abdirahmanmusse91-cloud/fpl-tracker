@@ -288,6 +288,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
               <button class="bar-toggle-btn" id="toggle-total" onclick="setBarMode('total')">TOTAL</button>
               <button class="bar-toggle-btn" id="toggle-quarter" onclick="setBarMode('quarter')">KVARTAL</button>
               <button class="bar-toggle-btn" id="toggle-bench" onclick="setBarMode('bench')">BÄNK</button>
+              <button class="bar-toggle-btn" id="toggle-hits" onclick="setBarMode('hits')">MINUS</button>
             </div>
             <div class="table-tag" id="gw-selected-label">GW —</div>
           </div>
@@ -345,7 +346,7 @@ let LEAGUE_ID = parseInt(localStorage.getItem('fpl_league_id')) || null;
 let LEAGUE_NAME = localStorage.getItem('fpl_league_name') || '';
 if (LEAGUE_NAME) document.getElementById('league-name-sub').textContent = LEAGUE_NAME;
 
-let managers = [], gwHistory = {}, benchHistory = {}, currentGW = 1, selectedGW = 1, dataLoaded = false, isLive = false;
+let managers = [], gwHistory = {}, benchHistory = {}, hitsHistory = {}, currentGW = 1, selectedGW = 1, dataLoaded = false, isLive = false;
 let pollTimer = null;
 
 async function get(path) {
@@ -401,6 +402,7 @@ async function init() {
     isLive       = data.is_live || false;
     gwHistory    = parseGwHistory(data.gw_history);
     benchHistory = parseGwHistory(data.bench_history || {});
+    hitsHistory  = parseGwHistory(data.hits_history || {});
     selectedGW   = currentGW;
     dataLoaded   = true;
     if (data.league_name) {
@@ -434,6 +436,7 @@ async function refreshData() {
     isLive       = data.is_live || false;
     gwHistory    = parseGwHistory(data.gw_history);
     benchHistory = parseGwHistory(data.bench_history || {});
+    hitsHistory  = parseGwHistory(data.hits_history || {});
     selectedGW   = currentGW;
     updateLiveBadge(isLive);
     checkLeaderChange(managers[0]?.player_name);
@@ -500,20 +503,27 @@ function render() {
   renderBars(currentGW);
 }
 
-let barMode = 'gw', benchSort = 'gw';
+let barMode = 'gw', benchSort = 'gw', hitSort = 'gw';
 
 function setBarMode(mode) {
   barMode = mode;
   benchSort = 'gw';
+  hitSort = 'gw';
   document.getElementById('toggle-gw').classList.toggle('active', mode==='gw');
   document.getElementById('toggle-total').classList.toggle('active', mode==='total');
   document.getElementById('toggle-quarter').classList.toggle('active', mode==='quarter');
   document.getElementById('toggle-bench').classList.toggle('active', mode==='bench');
+  document.getElementById('toggle-hits').classList.toggle('active', mode==='hits');
   renderBars(selectedGW);
 }
 
 function setBenchSort(sort) {
   benchSort = sort;
+  renderBars(selectedGW);
+}
+
+function setHitSort(sort) {
+  hitSort = sort;
   renderBars(selectedGW);
 }
 
@@ -588,6 +598,50 @@ function renderBars(gw) {
         <div style="display:flex;gap:6px;flex-shrink:0;font-family:'IBM Plex Mono',monospace;">
           ${q?`<span style="font-size:0.75rem;color:${qActive?'var(--g)':'var(--muted2)'};font-weight:${qActive?'600':'400'}">${s.q_bench}</span>`:''}
           <span style="font-size:0.72rem;color:${totActive?'var(--g)':'var(--muted2)'};font-weight:${totActive?'600':'400'}">${s.total_bench}</span>
+        </div>
+      </div>`).join('');
+    return;
+  }
+
+  if (barMode === 'hits') {
+    const q = getQuarterForGW(gw);
+    const qRange = q ? Array.from({length: gw - q.from + 1}, (_, i) => q.from + i) : [gw];
+    const allGWs = Array.from({length: currentGW}, (_, i) => i + 1);
+    const rows = managers.map(m => ({
+      name:       m.player_name,
+      gw_hits:    hitsHistory[m.entry]?.[gw] || 0,
+      q_hits:     qRange.reduce((s, g) => s + (hitsHistory[m.entry]?.[g] || 0), 0),
+      total_hits: allGWs.reduce((s, g) => s + (hitsHistory[m.entry]?.[g] || 0), 0),
+    }));
+    const sortKey = hitSort === 'quarter' ? 'q_hits' : hitSort === 'total' ? 'total_hits' : 'gw_hits';
+    const data = rows.sort((a, b) => b[sortKey] - a[sortKey]);
+    const max = Math.max(...data.map(d => d[sortKey]), 1);
+
+    const gwLabel   = `GW${gw}`;
+    const qLabel    = q ? `K${q.num}` : '';
+    const gwActive  = hitSort === 'gw';
+    const qActive   = hitSort === 'quarter';
+    const totActive = hitSort === 'total';
+    const hStyle    = (active) => `cursor:pointer;font-size:0.65rem;font-family:'IBM Plex Mono',monospace;letter-spacing:1px;color:${active?'var(--red)':'var(--muted2)'};border-bottom:1px solid ${active?'var(--red)':'transparent'};padding-bottom:1px;`;
+
+    document.getElementById('gw-selected-label').textContent = `MINUS ${gwLabel}`;
+    document.getElementById('gw-bars').innerHTML =
+      `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;padding:0 2px;">
+        <div style="flex:1"></div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <span style="${hStyle(gwActive)}" onclick="setHitSort('gw')">${gwActive?'↓ ':''}${gwLabel}</span>
+          ${q?`<span style="${hStyle(qActive)}" onclick="setHitSort('quarter')">${qActive?'↓ ':''}${qLabel}</span>`:''}
+          <span style="${hStyle(totActive)}" onclick="setHitSort('total')">${totActive?'↓ ':''}Tot</span>
+        </div>
+      </div>` +
+      data.map((s, i) => `
+      <div class="bar-row">
+        <div class="bar-name" title="${s.name}">${s.name}</div>
+        <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s[sortKey]/max*100).toFixed(1)}%;background:var(--red)"></div></div>
+        <div class="bar-pts" style="color:${gwActive?'var(--red)':'var(--muted2)'}">${s.gw_hits}</div>
+        <div style="display:flex;gap:6px;flex-shrink:0;font-family:'IBM Plex Mono',monospace;">
+          ${q?`<span style="font-size:0.75rem;color:${qActive?'var(--red)':'var(--muted2)'};font-weight:${qActive?'600':'400'}">${s.q_hits}</span>`:''}
+          <span style="font-size:0.72rem;color:${totActive?'var(--red)':'var(--muted2)'};font-weight:${totActive?'600':'400'}">${s.total_hits}</span>
         </div>
       </div>`).join('');
     return;
