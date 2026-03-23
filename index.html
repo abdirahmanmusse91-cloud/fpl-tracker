@@ -212,18 +212,44 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .bar-toggle-btn.active { background:var(--g); color:#000; border-color:var(--g); font-weight:600; }
 
 /* Updated timestamp */
+
+/* League setup */
+.setup-overlay { position:fixed; inset:0; background:var(--dark); z-index:500; display:flex; align-items:center; justify-content:center; padding:20px; }
+.setup-card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:32px 28px; width:100%; max-width:380px; }
+.setup-title { font-family:'Bebas Neue',sans-serif; font-size:1.6rem; letter-spacing:3px; color:var(--g); margin-bottom:6px; }
+.setup-desc { font-size:0.8rem; color:var(--muted2); margin-bottom:20px; line-height:1.5; }
+.setup-input { width:100%; background:var(--dark); border:1px solid var(--border2); color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:1rem; padding:11px 14px; border-radius:8px; outline:none; margin-bottom:10px; }
+.setup-input:focus { border-color:rgba(0,255,135,0.3); }
+.setup-btn { width:100%; background:var(--g); color:#000; border:none; border-radius:8px; padding:12px; font-weight:600; font-size:0.9rem; cursor:pointer; }
+.setup-btn:hover { background:var(--g2); }
+.setup-hint { font-size:0.65rem; color:var(--muted); margin-top:10px; line-height:1.5; font-family:'IBM Plex Mono',monospace; }
+.setup-error { font-size:0.72rem; color:var(--red); margin-top:6px; min-height:16px; }
+.change-league { font-size:0.6rem; color:var(--muted); letter-spacing:1px; cursor:pointer; font-family:'IBM Plex Mono',monospace; text-decoration:underline; }
+.change-league:hover { color:var(--muted2); }
 </style>
 </head>
 <body>
+<div class="setup-overlay hidden" id="setup-overlay">
+  <div class="setup-card">
+    <div class="setup-title">FPL Tracker</div>
+    <div class="setup-desc">Ange din ligas ID-kod för att komma igång.<br>Du hittar den i FPL-appen under Ligainformation.</div>
+    <input class="setup-input" id="league-input" type="number" placeholder="Ex: 1076120" onkeydown="if(event.key==='Enter') saveLeague()">
+    <button class="setup-btn" onclick="saveLeague()">Starta</button>
+    <div class="setup-error" id="setup-error"></div>
+    <div class="setup-hint">Liga-ID finns i URL:en när du öppnar ligan på fantasy.premierleague.com</div>
+  </div>
+</div>
+
 <header>
   <div class="logo">
     <div class="logo-mark">F</div>
     <div>
       <div class="logo-text">FPL Tracker</div>
-      <div class="logo-sub">Liga · Live Data</div>
+      <div class="logo-sub" id="league-name-sub">Liga · Live Data</div>
     </div>
   </div>
   <div style="display:flex;gap:8px;align-items:center;">
+    <span class="change-league" onclick="changeLeague()">Byt liga</span>
     <div class="live-badge hidden" id="live-badge">● LIVE</div>
     <div class="gw-pill hidden" id="gw-pill">GW —</div>
   </div>
@@ -314,9 +340,10 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 </div>
 
 <script>
-const LEAGUE_ID = 1076120;
 const QUARTERS = {1:[1,10], 2:[11,20], 3:[21,30], 4:[31,38]};
-
+let LEAGUE_ID = parseInt(localStorage.getItem('fpl_league_id')) || null;
+let LEAGUE_NAME = localStorage.getItem('fpl_league_name') || '';
+if (LEAGUE_NAME) document.getElementById('league-name-sub').textContent = LEAGUE_NAME;
 
 let managers = [], gwHistory = {}, benchHistory = {}, currentGW = 1, selectedGW = 1, dataLoaded = false, isLive = false;
 let pollTimer = null;
@@ -335,7 +362,38 @@ function parseGwHistory(raw) {
   return h;
 }
 
+function saveLeague() {
+  const input = document.getElementById('league-input');
+  const val = parseInt(input.value.trim());
+  if (!val || val < 1) {
+    document.getElementById('setup-error').textContent = 'Ange ett giltigt liga-ID (t.ex. 1076120)';
+    return;
+  }
+  LEAGUE_ID = val;
+  localStorage.setItem('fpl_league_id', val);
+  document.getElementById('setup-overlay').classList.add('hidden');
+  document.getElementById('loading').classList.remove('hidden');
+  init();
+}
+
+function changeLeague() {
+  localStorage.removeItem('fpl_league_id');
+  localStorage.removeItem('fpl_league_name');
+  LEAGUE_ID = null;
+  LEAGUE_NAME = '';
+  document.getElementById('setup-overlay').classList.remove('hidden');
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('dashboard').classList.add('hidden');
+  document.getElementById('setup-error').textContent = '';
+  document.getElementById('league-input').value = '';
+}
+
 async function init() {
+  if (!LEAGUE_ID) {
+    document.getElementById('setup-overlay').classList.remove('hidden');
+    document.getElementById('loading').classList.add('hidden');
+    return;
+  }
   try {
     const data = await get(`/api/dashboard/${LEAGUE_ID}`);
     managers     = data.managers;
@@ -345,6 +403,11 @@ async function init() {
     benchHistory = parseGwHistory(data.bench_history || {});
     selectedGW   = currentGW;
     dataLoaded   = true;
+    if (data.league_name) {
+      LEAGUE_NAME = data.league_name;
+      localStorage.setItem('fpl_league_name', LEAGUE_NAME);
+      document.getElementById('league-name-sub').textContent = LEAGUE_NAME;
+    }
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('dashboard').classList.remove('hidden');
     document.getElementById('send-btn').disabled = false;
@@ -572,6 +635,7 @@ async function callAI(userMessage) {
         user_message: userMessage,
         history: chatHistory.slice(-6),
         league_id: LEAGUE_ID,
+        league_name: LEAGUE_NAME,
       })
     });
     const d = await r.json();

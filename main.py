@@ -161,11 +161,12 @@ async def sb_write(entry_id: int, data: dict[int, int], bench_data: dict[int, in
 
 # ── Supabase: managers_cache ──
 
-async def sb_upsert_managers(managers: list) -> None:
+async def sb_upsert_managers(managers: list, league_id: int = None) -> None:
     now = datetime.now(timezone.utc).isoformat()
     rows = [
         {"entry_id": m["entry"], "player_name": m["player_name"],
-         "entry_name": m["entry_name"], "total": m["total"], "rank": i + 1, "updated_at": now}
+         "entry_name": m["entry_name"], "total": m["total"], "rank": i + 1,
+         "league_id": league_id, "updated_at": now}
         for i, m in enumerate(managers)
     ]
     try:
@@ -179,13 +180,16 @@ async def sb_upsert_managers(managers: list) -> None:
         pass
 
 
-async def sb_read_managers() -> list:
+async def sb_read_managers(league_id: int = None) -> list:
     try:
+        params = {"select": "*", "order": "rank.asc"}
+        if league_id:
+            params["league_id"] = f"eq.{league_id}"
         async with httpx.AsyncClient(timeout=8) as c:
             r = await c.get(
                 f"{SUPABASE_URL}/rest/v1/managers_cache",
                 headers=SB_HEADERS,
-                params={"select": "*", "order": "rank.asc"},
+                params=params,
             )
             if r.status_code == 200:
                 return [
@@ -308,7 +312,9 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
         )
         if league_r.status_code != 200:
             raise HTTPException(status_code=league_r.status_code, detail="FPL API error")
-        managers = league_r.json()["standings"]["results"]
+        league_data = league_r.json()
+        managers = league_data["standings"]["results"]
+        league_name = league_data.get("league", {}).get("name", f"Liga {league_id}")
 
     entry_ids = [m["entry"] for m in managers]
     gw_history, synced_at_map, bench_history = await sb_read_all(entry_ids)
@@ -362,7 +368,7 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
         for eid, data in to_cache.items():
             background_tasks.add_task(sb_write, eid, data, bench_to_cache.get(eid))
 
-    background_tasks.add_task(sb_upsert_managers, managers)
+    background_tasks.add_task(sb_upsert_managers, managers, league_id)
     background_tasks.add_task(sb_update_league_state, league_id, current_gw, live, managers)
 
     return {
@@ -371,6 +377,7 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
         "bench_history": bench_history,
         "current_gw": current_gw,
         "is_live": live,
+        "league_name": league_name,
     }
 
 
@@ -736,17 +743,21 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
     history = body.get("history", [])
     session_id = body.get("session_id", "default")
     league_id = body.get("league_id", LEAGUE_ID)
+    league_name = body.get("league_name", f"Liga {league_id}")
 
     if not user_message:
         return {"error": "bad_request", "message": AI_ERROR_MESSAGES["bad_request"]}
 
-    # Fetch managers from cache, fallback to FPL
-    managers = await sb_read_managers()
+    # Fetch managers from cache (filtered by league), fallback to FPL
+    managers = await sb_read_managers(league_id)
     if not managers:
         try:
             async with httpx.AsyncClient(timeout=15) as c:
                 r = await c.get(f"{FPL_BASE}/leagues-classic/{league_id}/standings/", headers=FPL_HEADERS)
-                managers = r.json()["standings"]["results"] if r.status_code == 200 else []
+                if r.status_code == 200:
+                    data = r.json()
+                    managers = data["standings"]["results"]
+                    league_name = data.get("league", {}).get("name", league_name)
         except Exception:
             return {"error": "api_error", "message": "Kunde inte hämta ligadata. Försök igen. 🔧"}
 
@@ -760,7 +771,7 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
     player_names = ", ".join(m["player_name"] for m in managers)
 
     system_prompt = (
-        f"FPL-assistent, liga 'Big Blinds' ({len(managers)} spelare, GW{current_gw}). "
+        f"FPL-assistent, liga '{league_name}' ({len(managers)} spelare, GW{current_gw}). "
         f"K1=GW1-10,K2=GW11-20,K3=GW21-30,K4=GW31-38. Spelare: {player_names}. "
         f"Svara på svenska med emojis. Kortfattad men fullständig. "
         f"Använd ALLTID verktyg för data—uppfinn aldrig siffror. Nämn alla spelare som uppfyller kriteriet. "
