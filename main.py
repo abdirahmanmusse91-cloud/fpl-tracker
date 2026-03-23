@@ -205,6 +205,36 @@ async def sb_read_managers(league_id: int = None) -> list:
     return []
 
 
+# ── Supabase: leagues ──
+
+async def sb_upsert_league(league_id: int, league_name: str) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=6) as c:
+            await c.post(
+                f"{SUPABASE_URL}/rest/v1/leagues",
+                headers={**SB_HEADERS, "Prefer": "resolution=merge-duplicates"},
+                json={"league_id": league_id, "league_name": league_name,
+                      "last_used": datetime.now(timezone.utc).isoformat()},
+            )
+    except Exception:
+        pass
+
+
+async def sb_get_leagues() -> list:
+    try:
+        async with httpx.AsyncClient(timeout=6) as c:
+            r = await c.get(
+                f"{SUPABASE_URL}/rest/v1/leagues",
+                headers=SB_HEADERS,
+                params={"select": "league_id,league_name", "order": "last_used.desc"},
+            )
+            if r.status_code == 200:
+                return r.json()
+    except Exception:
+        pass
+    return []
+
+
 # ── Supabase: league_state ──
 
 async def sb_update_league_state(league_id: int, current_gw: int, live: bool, managers: list) -> None:
@@ -381,6 +411,7 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
 
     background_tasks.add_task(sb_upsert_managers, managers, league_id)
     background_tasks.add_task(sb_update_league_state, league_id, current_gw, live, managers)
+    background_tasks.add_task(sb_upsert_league, league_id, league_name)
 
     return {
         "managers": managers,
@@ -940,6 +971,11 @@ async def get_logs(limit: int = 50, level: str = None):
 
 
 # ── Ping ──
+
+@app.get("/api/leagues")
+async def get_leagues():
+    return await sb_get_leagues()
+
 
 @app.get("/api/ping")
 @app.head("/api/ping")

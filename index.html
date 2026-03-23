@@ -224,6 +224,12 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .setup-btn:hover { background:var(--g2); }
 .setup-hint { font-size:0.65rem; color:var(--muted); margin-top:10px; line-height:1.5; font-family:'IBM Plex Mono',monospace; }
 .setup-error { font-size:0.72rem; color:var(--red); margin-top:6px; min-height:16px; }
+.setup-divider { display:flex; align-items:center; gap:10px; margin:16px 0 12px; }
+.setup-divider::before, .setup-divider::after { content:''; flex:1; height:1px; background:var(--border); }
+.setup-divider span { font-size:0.6rem; color:var(--muted); font-family:'IBM Plex Mono',monospace; letter-spacing:1px; }
+.known-leagues { display:flex; flex-direction:column; gap:6px; margin-bottom:4px; }
+.known-league-btn { background:var(--card2); border:1px solid var(--border2); color:var(--text); border-radius:8px; padding:11px 14px; text-align:left; cursor:pointer; font-size:0.85rem; font-weight:500; transition:border-color 0.15s; }
+.known-league-btn:hover { border-color:rgba(0,255,135,0.3); color:var(--g); }
 .change-league { font-size:0.6rem; color:var(--muted); letter-spacing:1px; cursor:pointer; font-family:'IBM Plex Mono',monospace; text-decoration:underline; }
 .change-league:hover { color:var(--muted2); }
 </style>
@@ -232,7 +238,14 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 <div class="setup-overlay hidden" id="setup-overlay">
   <div class="setup-card">
     <div class="setup-title">FPL Tracker</div>
-    <div class="setup-desc">Ange din ligas ID-kod för att komma igång.<br>Du hittar den i FPL-appen under Ligainformation.</div>
+    <div id="known-leagues-section" class="hidden">
+      <div class="setup-desc" style="margin-bottom:10px;">Välj din liga:</div>
+      <div class="known-leagues" id="known-leagues-list"></div>
+      <div class="setup-divider"><span>eller ange ny</span></div>
+    </div>
+    <div id="new-league-section">
+      <div class="setup-desc" id="setup-desc-text">Ange din ligas ID-kod för att komma igång.<br>Du hittar den i FPL-appen under Ligainformation.</div>
+    </div>
     <input class="setup-input" id="league-input" type="number" placeholder="Ex: 1076120" onkeydown="if(event.key==='Enter') saveLeague()">
     <button class="setup-btn" onclick="saveLeague()">Starta</button>
     <div class="setup-error" id="setup-error"></div>
@@ -377,22 +390,47 @@ function saveLeague() {
   init();
 }
 
-function changeLeague() {
-  localStorage.removeItem('fpl_league_id');
-  localStorage.removeItem('fpl_league_name');
-  LEAGUE_ID = null;
-  LEAGUE_NAME = '';
+async function showSetup() {
   document.getElementById('setup-overlay').classList.remove('hidden');
   document.getElementById('loading').classList.add('hidden');
   document.getElementById('dashboard').classList.add('hidden');
   document.getElementById('setup-error').textContent = '';
   document.getElementById('league-input').value = '';
+  try {
+    const leagues = await get('/api/leagues');
+    if (leagues && leagues.length > 0) {
+      document.getElementById('known-leagues-section').classList.remove('hidden');
+      document.getElementById('setup-desc-text').textContent = 'Eller ange ett nytt liga-ID:';
+      document.getElementById('known-leagues-list').innerHTML = leagues.map(l =>
+        `<button class="known-league-btn" onclick="pickLeague(${l.league_id}, '${l.league_name.replace(/'/g,"\\'")}')">
+          ${l.league_name}
+        </button>`
+      ).join('');
+    }
+  } catch(e) { /* tyst — visa bara input */ }
+}
+
+function pickLeague(id, name) {
+  LEAGUE_ID = id;
+  LEAGUE_NAME = name;
+  localStorage.setItem('fpl_league_id', id);
+  localStorage.setItem('fpl_league_name', name);
+  document.getElementById('setup-overlay').classList.add('hidden');
+  document.getElementById('loading').classList.remove('hidden');
+  init();
+}
+
+function changeLeague() {
+  localStorage.removeItem('fpl_league_id');
+  localStorage.removeItem('fpl_league_name');
+  LEAGUE_ID = null;
+  LEAGUE_NAME = '';
+  showSetup();
 }
 
 async function init() {
   if (!LEAGUE_ID) {
-    document.getElementById('setup-overlay').classList.remove('hidden');
-    document.getElementById('loading').classList.add('hidden');
+    showSetup();
     return;
   }
   try {
