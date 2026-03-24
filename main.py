@@ -845,6 +845,34 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
     state = await sb_get_league_state(league_id)
     current_gw = state["current_gw"] if state else 1
 
+    # If cache is empty, fetch from FPL API directly (same as dashboard)
+    total_cached_gws = sum(len(v) for v in gw_history.values())
+    if total_cached_gws == 0 and current_gw > 0:
+        async def _fetch_entry_chat(entry_id: int):
+            try:
+                async with httpx.AsyncClient(timeout=15) as c:
+                    r = await c.get(f"{FPL_BASE}/entry/{entry_id}/history/", headers=FPL_HEADERS)
+                    data = r.json()
+                new_data: dict[int, int] = {}
+                new_bench: dict[int, int] = {}
+                new_hits: dict[int, int] = {}
+                for gw_row in data.get("current", []):
+                    gw_num = gw_row["event"]
+                    hit_cost = gw_row.get("event_transfers_cost") or 0
+                    pts = gw_row["points"] - hit_cost
+                    bench = gw_row.get("points_on_bench") or 0
+                    gw_history[entry_id][gw_num] = pts
+                    bench_history[entry_id][gw_num] = bench
+                    hits_history[entry_id][gw_num] = hit_cost
+                    new_data[gw_num] = pts
+                    new_bench[gw_num] = bench
+                    new_hits[gw_num] = hit_cost
+                if new_data:
+                    background_tasks.add_task(sb_write, entry_id, new_data, new_bench, new_hits)
+            except Exception:
+                pass
+        await asyncio.gather(*[_fetch_entry_chat(eid) for eid in entry_ids])
+
     tool_fns = make_tool_fns(managers, gw_history, current_gw, bench_history, hits_history)
     player_names = ", ".join(m["player_name"] for m in managers)
 
