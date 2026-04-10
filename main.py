@@ -471,6 +471,107 @@ async def bootstrap_proxy():
     return await get_bootstrap()
 
 
+# ── Team price view ──
+
+@app.get("/api/team/{entry_id}/prices")
+async def get_team_prices(entry_id: int, gw: int | None = None):
+    boot = await get_bootstrap()
+    _, current_gw = get_finished_gws(boot)
+    requested_gw = gw if gw is not None else current_gw
+    is_current   = requested_gw == current_gw
+
+    players_map = {p["id"]: p for p in boot["elements"]}
+    teams_map   = {t["id"]: t["short_name"] for t in boot["teams"]}
+
+    async with httpx.AsyncClient(timeout=20) as c:
+        picks_r, transfers_r = await asyncio.gather(
+            c.get(f"{FPL_BASE}/entry/{entry_id}/event/{requested_gw}/picks/", headers=FPL_HEADERS),
+            c.get(f"{FPL_BASE}/entry/{entry_id}/transfers/", headers=FPL_HEADERS),
+        )
+
+    if picks_r.status_code != 200:
+        raise HTTPException(status_code=picks_r.status_code, detail="Kunde inte hämta truppen")
+
+    picks     = picks_r.json().get("picks", [])
+    transfers = transfers_r.json() if transfers_r.status_code == 200 else []
+    pick_ids  = [p["element"] for p in picks]
+
+    # Only transfers at or before requested_gw
+    transfer_map: dict[int, dict] = {}
+    for t in transfers:
+        if t["event"] > requested_gw:
+            continue
+        el = t["element_in"]
+        if el not in transfer_map or t["event"] > transfer_map[el]["gw"]:
+            transfer_map[el] = {"price": t["element_in_cost"], "gw": t["event"]}
+
+    # Prices at requested_gw
+    if is_current:
+        gw_price    = {el: players_map[el]["now_cost"] for el in pick_ids if el in players_map}
+        start_price = {}  # use cost_change_start fallback below
+    else:
+        # Fetch element-summary for each player in parallel
+        async with httpx.AsyncClient(timeout=20) as c:
+            responses = await asyncio.gather(*[
+                c.get(f"{FPL_BASE}/element-summary/{el}/", headers=FPL_HEADERS)
+                for el in pick_ids
+            ])
+        gw_price    = {}
+        start_price = {}
+        for el, r in zip(pick_ids, responses):
+            if r.status_code != 200:
+                continue
+            history = r.json().get("history", [])
+            at_req = next((h["value"] for h in history if h["round"] == requested_gw), None)
+            at_gw1 = next((h["value"] for h in history if h["round"] == 1), None)
+            if at_req is not None:
+                gw_price[el] = at_req
+            if at_gw1 is not None:
+                start_price[el] = at_gw1
+
+    pos_label = {1: "MV", 2: "DEF", 3: "MID", 4: "FWD"}
+    pos_order = {1: 0, 2: 1, 3: 2, 4: 3}
+
+    result = []
+    for pick in picks:
+        el_id  = pick["element"]
+        player = players_map.get(el_id, {})
+        price  = gw_price.get(el_id, player.get("now_cost", 0))
+
+        if el_id in transfer_map:
+            buy_price = transfer_map[el_id]["price"]
+            buy_gw    = transfer_map[el_id]["gw"]
+        elif is_current:
+            buy_price = player.get("now_cost", 0) - player.get("cost_change_start", 0)
+            buy_gw    = None
+        else:
+            buy_price = start_price.get(el_id, price)
+            buy_gw    = None
+
+        result.append({
+            "element_id": el_id,
+            "name":       player.get("web_name", "?"),
+            "position":   pos_label.get(player.get("element_type", 0), "?"),
+            "pos_order":  pos_order.get(player.get("element_type", 0), 4),
+            "team":       teams_map.get(player.get("team", 0), "?"),
+            "buy_price":  buy_price,
+            "buy_gw":     buy_gw,
+            "now_cost":   price,
+            "change":     price - buy_price,
+        })
+
+    result.sort(key=lambda x: (x["pos_order"], x["name"]))
+    for p in result:
+        del p["pos_order"]
+
+    return {
+        "players":      result,
+        "net_change":   sum(p["change"] for p in result),
+        "current_gw":   current_gw,
+        "requested_gw": requested_gw,
+    }
+
+
 # ── Sync endpoint ──
 
 @app.post("/api/sync")
@@ -1008,6 +1109,14 @@ async def get_leagues():
 @app.get("/api/ping")
 @app.head("/api/ping")
 async def ping():
+    return {"status": "ok"}
+
+
+@app.get("/api/healthz")
+@app.head("/api/healthz")
+async def healthz():
+    """Pingar Supabase så att projektet inte pausas."""
+    await sb_get_leagues()
     return {"status": "ok"}
 
 

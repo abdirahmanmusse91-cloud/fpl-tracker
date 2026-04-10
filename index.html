@@ -232,6 +232,43 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .known-league-btn:hover { border-color:rgba(0,255,135,0.3); color:var(--g); }
 .change-league { font-size:0.6rem; color:var(--muted); letter-spacing:1px; cursor:pointer; font-family:'IBM Plex Mono',monospace; text-decoration:underline; }
 .change-league:hover { color:var(--muted2); }
+
+/* ── Team price view ── */
+.team-view { position:fixed; inset:0; background:var(--dark); z-index:200; overflow-y:auto; display:flex; flex-direction:column; }
+.team-view.hidden { display:none; }
+.team-view-header { position:sticky; top:0; background:var(--dark); border-bottom:1px solid var(--border); padding:0 20px; height:56px; display:flex; align-items:center; gap:14px; z-index:10; flex-shrink:0; }
+.team-back-btn { background:none; border:1px solid var(--border2); color:var(--muted2); border-radius:6px; padding:5px 12px; font-size:0.75rem; font-family:'IBM Plex Mono',monospace; letter-spacing:1px; cursor:pointer; flex-shrink:0; }
+.team-back-btn:hover { border-color:var(--g); color:var(--g); }
+.team-gw-nav { display:flex; gap:4px; overflow-x:auto; padding:10px 20px; border-bottom:1px solid var(--border); flex-shrink:0; scrollbar-width:none; }
+.team-gw-nav::-webkit-scrollbar { display:none; }
+.team-gwb { background:none; border:1px solid var(--border2); color:var(--muted2); border-radius:5px; padding:4px 9px; font-size:0.68rem; font-family:'IBM Plex Mono',monospace; cursor:pointer; white-space:nowrap; flex-shrink:0; }
+.team-gwb:hover { border-color:var(--muted2); color:var(--text); }
+.team-gwb.active { border-color:var(--g); color:var(--g); background:rgba(0,255,135,0.06); }
+.team-view-title { font-family:'Bebas Neue',sans-serif; font-size:1.1rem; letter-spacing:2px; color:var(--text); }
+.team-view-body { padding:20px; max-width:600px; margin:0 auto; width:100%; }
+.team-net { display:flex; align-items:baseline; gap:8px; margin-bottom:20px; }
+.team-net-label { font-size:0.65rem; color:var(--muted); font-family:'IBM Plex Mono',monospace; letter-spacing:1px; text-transform:uppercase; }
+.team-net-val { font-family:'Bebas Neue',sans-serif; font-size:2rem; }
+.team-net-val.pos { color:var(--g); }
+.team-net-val.neg { color:var(--red); }
+.team-net-val.zero { color:var(--muted2); }
+.team-pos-group { margin-bottom:18px; }
+.team-pos-label { font-size:0.6rem; color:var(--muted); font-family:'IBM Plex Mono',monospace; letter-spacing:2px; text-transform:uppercase; margin-bottom:6px; }
+.team-player-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); }
+.team-player-row:last-child { border-bottom:none; }
+.team-player-name { flex:1; font-size:0.9rem; font-weight:500; }
+.team-player-team { font-size:0.7rem; color:var(--muted2); font-family:'IBM Plex Mono',monospace; }
+.team-prices { display:flex; align-items:center; gap:6px; flex-shrink:0; font-family:'IBM Plex Mono',monospace; font-size:0.78rem; }
+.team-buy { color:var(--muted2); }
+.team-arrow { color:var(--muted); font-size:0.65rem; }
+.team-now { color:var(--text); font-weight:500; }
+.team-change { font-size:0.8rem; font-weight:600; min-width:42px; text-align:right; font-family:'IBM Plex Mono',monospace; }
+.team-change.pos { color:var(--g); }
+.team-change.neg { color:var(--red); }
+.team-change.zero { color:var(--muted); }
+.team-loading { text-align:center; padding:60px 20px; color:var(--muted2); font-size:0.85rem; }
+.mn-link { cursor:pointer; text-decoration:none; color:inherit; }
+.mn-link:hover { color:var(--g); }
 </style>
 </head>
 <body>
@@ -351,6 +388,18 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
       <div class="api-note">Drivs av Groq · Live ligadata</div>
     </div>
   </aside>
+</div>
+
+<!-- Team price view overlay -->
+<div class="team-view hidden" id="team-view">
+  <div class="team-view-header">
+    <button class="team-back-btn" onclick="closeTeamView()">← TILLBAKA</button>
+    <div class="team-view-title" id="team-view-name"></div>
+  </div>
+  <div class="team-gw-nav" id="team-gw-nav"></div>
+  <div class="team-view-body" id="team-view-body">
+    <div class="team-loading">Hämtar lagdata…</div>
+  </div>
 </div>
 
 <script>
@@ -531,7 +580,7 @@ function render() {
   // standings
   document.getElementById('standings-body').innerHTML = managers.map((m,i)=>{
     const gp=gwHistory[m.entry]?.[currentGW]??'—', rc=i===0?'r1':i===1?'r2':i===2?'r3':'';
-    return `<tr class="${rc}"><td><span class="rn">${i+1}</span></td><td><span class="mn">${m.player_name}</span><span class="tn">${m.entry_name}</span></td><td><span class="tp">${m.total.toLocaleString('sv-SE')}</span></td><td>${gp}</td></tr>`;
+    return `<tr class="${rc}"><td><span class="rn">${i+1}</span></td><td><span class="mn mn-link" onclick="openTeamView(${m.entry},'${m.player_name.replace(/'/g,"\\'")}','${m.entry_name.replace(/'/g,"\\'")}')">${m.player_name}</span><span class="tn">${m.entry_name}</span></td><td><span class="tp">${m.total.toLocaleString('sv-SE')}</span></td><td>${gp}</td></tr>`;
   }).join('');
 
   // gw nav
@@ -869,6 +918,111 @@ function toggleChat() {
     if (msgs) msgs.scrollTop = msgs.scrollHeight;
   });
 })();
+
+// ── Team price view ──
+
+let _teamEntryId = null, _teamPlayerName = '', _teamTeamName = '', _teamSelectedGw = null;
+
+function fmt(v) { return '£' + (v / 10).toFixed(1) + 'm'; }
+
+async function openTeamView(entryId, playerName, teamName) {
+  _teamEntryId    = entryId;
+  _teamPlayerName = playerName;
+  _teamTeamName   = teamName;
+  _teamSelectedGw = currentGW;
+
+  document.getElementById('team-view-name').textContent = playerName.toUpperCase();
+  buildTeamGwNav(currentGW);
+  document.getElementById('team-view').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+
+  await loadTeamGw(currentGW);
+}
+
+function buildTeamGwNav(selectedGw) {
+  const nav = document.getElementById('team-gw-nav');
+  let html = '';
+  for (let g = 1; g <= currentGW; g++) {
+    html += `<button class="team-gwb ${g === selectedGw ? 'active' : ''}" id="tgwb-${g}" onclick="selectTeamGw(${g})">GW${g}</button>`;
+  }
+  nav.innerHTML = html;
+  // Scroll active button into view
+  setTimeout(() => {
+    const btn = document.getElementById(`tgwb-${selectedGw}`);
+    if (btn) btn.scrollIntoView({ inline: 'center', behavior: 'smooth' });
+  }, 50);
+}
+
+async function selectTeamGw(gw) {
+  if (gw === _teamSelectedGw) return;
+  _teamSelectedGw = gw;
+  document.querySelectorAll('.team-gwb').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById(`tgwb-${gw}`);
+  if (btn) { btn.classList.add('active'); btn.scrollIntoView({ inline: 'center', behavior: 'smooth' }); }
+  await loadTeamGw(gw);
+}
+
+async function loadTeamGw(gw) {
+  const body = document.getElementById('team-view-body');
+  const isHistorical = gw < currentGW;
+  body.innerHTML = `<div class="team-loading">${isHistorical ? 'Hämtar historisk data…' : 'Hämtar lagdata…'}</div>`;
+  try {
+    const url = gw === currentGW ? `/api/team/${_teamEntryId}/prices` : `/api/team/${_teamEntryId}/prices?gw=${gw}`;
+    const data = await get(url);
+    renderTeamView(data);
+  } catch(e) {
+    body.innerHTML = `<div class="team-loading" style="color:var(--red)">Kunde inte hämta data.<br>${e.message}</div>`;
+  }
+}
+
+function closeTeamView() {
+  document.getElementById('team-view').classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+function renderTeamView(data) {
+  const { players, net_change, requested_gw } = data;
+  const netCls  = net_change > 0 ? 'pos' : net_change < 0 ? 'neg' : 'zero';
+  const netSign  = net_change > 0 ? '+' : '';
+  const isLatest = requested_gw === currentGW;
+
+  const groups   = { MV: [], DEF: [], MID: [], FWD: [] };
+  for (const p of players) (groups[p.position] || groups.FWD).push(p);
+  const posNames = { MV: 'Målvakter', DEF: 'Försvarare', MID: 'Mittfältare', FWD: 'Anfallare' };
+
+  const groupsHtml = Object.entries(groups).filter(([,ps]) => ps.length > 0).map(([pos, ps]) => `
+    <div class="team-pos-group">
+      <div class="team-pos-label">${posNames[pos]}</div>
+      ${ps.map(p => {
+        const chgCls  = p.change > 0 ? 'pos' : p.change < 0 ? 'neg' : 'zero';
+        const chgSign = p.change > 0 ? '+' : '';
+        const boughtLabel = p.buy_gw ? `GW${p.buy_gw}` : 'Säsongsstart';
+        const priceLabel  = isLatest ? 'Nu' : `GW${requested_gw}`;
+        return `<div class="team-player-row">
+          <div>
+            <div class="team-player-name">${p.name}</div>
+            <div class="team-player-team">${p.team} · köpt ${boughtLabel}</div>
+          </div>
+          <div class="team-prices">
+            <span class="team-buy">${fmt(p.buy_price)}</span>
+            <span class="team-arrow">→</span>
+            <span class="team-now" title="${priceLabel}">${fmt(p.now_cost)}</span>
+          </div>
+          <div class="team-change ${chgCls}">${chgSign}${fmt(p.change)}</div>
+        </div>`;
+      }).join('')}
+    </div>
+  `).join('');
+
+  document.getElementById('team-view-body').innerHTML = `
+    <div style="margin-bottom:6px;font-size:0.7rem;color:var(--muted);font-family:'IBM Plex Mono',monospace;letter-spacing:1px;">${_teamTeamName} · GW${requested_gw}</div>
+    <div class="team-net">
+      <div class="team-net-label">Prisförändring sedan köp</div>
+      <div class="team-net-val ${netCls}">${netSign}${fmt(net_change)}</div>
+    </div>
+    ${groupsHtml}
+  `;
+}
 
 init();
 </script>
