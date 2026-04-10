@@ -548,6 +548,12 @@ async def get_team_prices(entry_id: int, gw: int | None = None):
             buy_price = start_price.get(el_id, price)
             buy_gw    = None
 
+        if price > buy_price:
+            sell_price = buy_price + math.floor((price - buy_price) / 2)
+        else:
+            sell_price = price
+        profit = sell_price - buy_price
+
         result.append({
             "element_id": el_id,
             "name":       player.get("web_name", "?"),
@@ -557,7 +563,8 @@ async def get_team_prices(entry_id: int, gw: int | None = None):
             "buy_price":  buy_price,
             "buy_gw":     buy_gw,
             "now_cost":   price,
-            "change":     price - buy_price,
+            "sell_price": sell_price,
+            "change":     profit,
         })
 
     result.sort(key=lambda x: (x["pos_order"], x["name"]))

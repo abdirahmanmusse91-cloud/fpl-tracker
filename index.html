@@ -1006,7 +1006,7 @@ function renderTeamView(data) {
           <div class="team-prices">
             <span class="team-buy">${fmt(p.buy_price)}</span>
             <span class="team-arrow">→</span>
-            <span class="team-now" title="${priceLabel}">${fmt(p.now_cost)}</span>
+            <span class="team-now" title="Marknadspris ${priceLabel}: ${fmt(p.now_cost)}">${fmt(p.sell_price)}</span>
           </div>
           <div class="team-change ${chgCls}">${chgSign}${fmt(p.change)}</div>
         </div>`;
