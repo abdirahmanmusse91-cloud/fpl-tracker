@@ -1,0 +1,10 @@
+{
+  "name": "fpl-tracker-tools",
+  "private": true,
+  "type": "module",
+  "description": "Utvecklingsverktyg — renderar frontend i headless browser och testar migrationer mot riktig Postgres",
+  "dependencies": {
+    "@electric-sql/pglite": "^0.2.0",
+    "playwright": "^1.49.0"
+  }
+}

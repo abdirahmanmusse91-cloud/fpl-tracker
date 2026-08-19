@@ -319,6 +319,8 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
   .podium { display:none; }
   .sec-podium { display:none; }
   td:first-child { white-space:nowrap; padding-right:4px; }
+  /* fast bredd på .rn klipper medaljen — låt cellen ge plats i stället */
+  .rn { width:auto; min-width:14px; }
   tr.r1 .rn::after { content:' 🥇'; font-size:0.78em; }
   tr.r2 .rn::after { content:' 🥈'; font-size:0.78em; }
   tr.r3 .rn::after { content:' 🥉'; font-size:0.78em; }
