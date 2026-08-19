@@ -1265,6 +1265,69 @@ async def delete_league(league_id: int):
     return {"deleted": league_id}
 
 
+@app.get("/api/livecheck/{league_id}")
+async def livecheck(league_id: int):
+    """Jämför de tre möjliga källorna för aktuell omgångs poäng.
+
+    Körs mitt under en pågående omgång för att avgöra vilka som uppdateras live:
+      standings_event_total — ur ligatabellen, samma endpoint FPL:s egen
+                              live-uppdaterade tabell bygger på
+      history_points        — ur /entry/{id}/history/, det appen använder idag
+      picks_live_points     — uträknat ur truppen + /event/{gw}/live/, garanterat
+                              live men kräver egen poänglogik
+    Stämmer de tre överens under pågående matcher är alla live.
+    """
+    boot = await get_bootstrap()
+    _, current_gw = get_finished_gws(boot)
+
+    async with httpx.AsyncClient(timeout=25) as c:
+        lr = await c.get(f"{FPL_BASE}/leagues-classic/{league_id}/standings/", headers=FPL_HEADERS)
+        if lr.status_code != 200:
+            raise HTTPException(status_code=lr.status_code, detail="FPL API error")
+        data = lr.json()
+        managers = data["standings"]["results"]
+
+        live_r = await c.get(f"{FPL_BASE}/event/{current_gw}/live/", headers=FPL_HEADERS)
+        pts_by_player = {e["id"]: e["stats"]["total_points"]
+                         for e in live_r.json().get("elements", [])}
+
+        async def per_entry(m: dict) -> dict:
+            eid = m["entry"]
+            hist_pts = picks_pts = None
+            try:
+                hr = await c.get(f"{FPL_BASE}/entry/{eid}/history/", headers=FPL_HEADERS)
+                row = next((g for g in hr.json().get("current", []) if g["event"] == current_gw), None)
+                if row:
+                    hist_pts = row["points"] - (row.get("event_transfers_cost") or 0)
+            except Exception:
+                pass
+            try:
+                pr = await c.get(f"{FPL_BASE}/entry/{eid}/event/{current_gw}/picks/", headers=FPL_HEADERS)
+                pj = pr.json()
+                # multiplier är 0 på bänken, 2 för kapten, 3 för triple captain
+                picks_pts = sum(p["multiplier"] * pts_by_player.get(p["element"], 0)
+                                for p in pj.get("picks", []))
+                picks_pts -= (pj.get("entry_history") or {}).get("event_transfers_cost", 0)
+            except Exception:
+                pass
+            return {"manager": m.get("player_name"),
+                    "standings_event_total": m.get("event_total"),
+                    "standings_total": m.get("total"),
+                    "history_points": hist_pts,
+                    "picks_live_points": picks_pts}
+
+        rows = await asyncio.gather(*[per_entry(m) for m in managers])
+
+    return {
+        "current_gw": current_gw,
+        "is_live": is_gw_live(boot, current_gw),
+        "last_updated_data": data.get("last_updated_data"),
+        "standings_rader": len(managers),
+        "spelare_i_live_endpoint": len(pts_by_player),
+        "managers": rows,
+    }
+
+
 @app.get("/api/ping")
 @app.head("/api/ping")
 async def ping():
