@@ -14,6 +14,16 @@ import httpx
 BASE_DIR = Path(__file__).parent
 
 app = FastAPI()
+
+
+@app.on_event("startup")
+async def _startup_migrate():
+    """Kör väntande databasmigrationer. Får aldrig blockera uppstarten."""
+    try:
+        from migrations import run_migrations
+        print("[migrations]", await run_migrations())
+    except Exception as e:
+        print(f"[migrations] misslyckades: {e} — fortsätter utan")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -36,6 +46,8 @@ SB_HEADERS = {
 }
 
 CURRENT_GW_TTL = timedelta(minutes=15)
+# FPL uppdaterar ligatabeller live sedan 26/27 — hämta tätare medan omgången spelas
+LIVE_GW_TTL = timedelta(minutes=2)
 QUARTERS = {1: (1, 10), 2: (11, 20), 3: (21, 30), 4: (31, 38)}
 LEAGUE_ID = 1076120
 
@@ -57,6 +69,20 @@ async def get_bootstrap() -> dict:
     return _boot
 
 
+async def get_season() -> int:
+    """Säsongens startår — 26/27 ger 2026. GW1:s deadline ligger alltid i augusti,
+    så årtalet i den identifierar säsongen entydigt."""
+    try:
+        boot = await get_bootstrap()
+        events = boot.get("events") or []
+        if events:
+            return int(events[0]["deadline_time"][:4])
+    except Exception:
+        pass
+    now = datetime.now(timezone.utc)
+    return now.year if now.month >= 7 else now.year - 1
+
+
 def get_finished_gws(boot: dict) -> tuple[list[int], int]:
     events = boot.get("events", [])
     finished = sorted(e["id"] for e in events if e["finished"])
@@ -69,7 +95,18 @@ def get_finished_gws(boot: dict) -> tuple[list[int], int]:
 
 def is_gw_live(boot: dict, current_gw: int) -> bool:
     active = next((e for e in boot.get("events", []) if e["id"] == current_gw), None)
-    return active is not None and not active.get("finished", True)
+    if active is None or active.get("finished", True):
+        return False
+    # Före deadline har omgången inte börjat — då är den inte "live"
+    deadline = active.get("deadline_time")
+    if deadline:
+        try:
+            dt = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) < dt:
+                return False
+        except ValueError:
+            pass
+    return True
 
 
 # ── Supabase: logs ──
@@ -102,7 +139,8 @@ async def sb_read(entry_id: int) -> dict[int, int]:
             r = await c.get(
                 f"{SUPABASE_URL}/rest/v1/gw_cache",
                 headers=SB_HEADERS,
-                params={"entry_id": f"eq.{entry_id}", "select": "gw,points", "order": "gw.asc"},
+                params={"entry_id": f"eq.{entry_id}", "season": f"eq.{await get_season()}",
+                        "select": "gw,points", "order": "gw.asc"},
             )
             if r.status_code == 200:
                 return {row["gw"]: row["points"] for row in r.json()}
@@ -111,11 +149,38 @@ async def sb_read(entry_id: int) -> dict[int, int]:
     return {}
 
 
-async def sb_read_all(entry_ids: list[int]) -> tuple[dict, dict, dict, dict]:
+# gw_cache behöver kolumnerna points_on_bench, points_on_hits och final
+# (se supabase_setup.sql). Saknas någon av dem stängs cachen av helt i stället
+# för att servera halva data — appen hämtar då allt färskt från FPL. Vi provar
+# igen var 10:e minut så att en körd migration slår igenom utan omstart.
+_SCHEMA_OK = True
+_SCHEMA_CHECKED_AT = 0.0
+_SCHEMA_RETRY = 600
+
+
+def _schema_usable() -> bool:
+    global _SCHEMA_OK
+    if not _SCHEMA_OK and (time.time() - _SCHEMA_CHECKED_AT) > _SCHEMA_RETRY:
+        _SCHEMA_OK = True
+    return _SCHEMA_OK
+
+
+def _schema_broken(where: str) -> None:
+    global _SCHEMA_OK, _SCHEMA_CHECKED_AT
+    _SCHEMA_OK = False
+    _SCHEMA_CHECKED_AT = time.time()
+    print(f"[gw_cache] saknade kolumner ({where}) — cachen avstängd. Sätt DATABASE_URL "
+          f"så körs migrationerna automatiskt vid start (se migrations.py)")
+
+
+async def sb_read_all(entry_ids: list[int]) -> tuple[dict, dict, dict, dict, dict]:
     gw_history: dict[int, dict[int, int]] = {eid: {} for eid in entry_ids}
     bench_history: dict[int, dict[int, int]] = {eid: {} for eid in entry_ids}
     hits_history: dict[int, dict[int, int]] = {eid: {} for eid in entry_ids}
     synced_at_map: dict[int, dict[int, datetime]] = {eid: {} for eid in entry_ids}
+    final_map: dict[int, dict[int, bool]] = {eid: {} for eid in entry_ids}
+    if not _schema_usable():
+        return gw_history, synced_at_map, bench_history, hits_history, final_map
     try:
         async with httpx.AsyncClient(timeout=10) as c:
             r = await c.get(
@@ -123,15 +188,19 @@ async def sb_read_all(entry_ids: list[int]) -> tuple[dict, dict, dict, dict]:
                 headers=SB_HEADERS,
                 params={
                     "entry_id": f"in.({','.join(str(e) for e in entry_ids)})",
-                    "select": "entry_id,gw,points,points_on_bench,points_on_hits,synced_at",
+                    "season": f"eq.{await get_season()}",
+                    "select": "entry_id,gw,points,points_on_bench,points_on_hits,synced_at,final",
                 },
             )
-        if r.status_code == 200:
+        if r.status_code == 400:
+            _schema_broken("läsning")
+        elif r.status_code == 200:
             for row in r.json():
                 eid = row["entry_id"]
                 gw_history[eid][row["gw"]] = row["points"]
                 bench_history[eid][row["gw"]] = row.get("points_on_bench") or 0
                 hits_history[eid][row["gw"]] = row.get("points_on_hits") or 0
+                final_map[eid][row["gw"]] = bool(row.get("final"))
                 raw_ts = row.get("synced_at")
                 if raw_ts:
                     try:
@@ -140,24 +209,34 @@ async def sb_read_all(entry_ids: list[int]) -> tuple[dict, dict, dict, dict]:
                         pass
     except Exception:
         pass
-    return gw_history, synced_at_map, bench_history, hits_history
+    return gw_history, synced_at_map, bench_history, hits_history, final_map
 
 
-async def sb_write(entry_id: int, data: dict[int, int], bench_data: dict[int, int] = None, hits_data: dict[int, int] = None) -> None:
+async def sb_write(entry_id: int, data: dict[int, int], bench_data: dict[int, int] = None,
+                   hits_data: dict[int, int] = None, checked_gws: set[int] = None) -> None:
+    """final=True först när FPL satt data_checked på omgången. Preliminära poäng
+    (omgången är låst först 09:00 UK dagen efter) hämtas om tills dess."""
     if not data:
         return
     now = datetime.now(timezone.utc).isoformat()
-    rows = [{"entry_id": entry_id, "gw": gw, "points": pts,
+    if not _schema_usable():
+        return
+    checked = checked_gws or set()
+    season = await get_season()
+    rows = [{"entry_id": entry_id, "season": season, "gw": gw, "points": pts,
              "points_on_bench": (bench_data or {}).get(gw, 0),
-             "points_on_hits": (hits_data or {}).get(gw, 0), "synced_at": now}
+             "points_on_hits": (hits_data or {}).get(gw, 0), "synced_at": now,
+             "final": gw in checked}
             for gw, pts in data.items()]
     try:
         async with httpx.AsyncClient(timeout=8) as c:
-            await c.post(
+            r = await c.post(
                 f"{SUPABASE_URL}/rest/v1/gw_cache",
                 headers={**SB_HEADERS, "Prefer": "resolution=merge-duplicates"},
                 json=rows,
             )
+            if r.status_code == 400:
+                _schema_broken("skrivning")
     except Exception:
         pass
 
@@ -233,6 +312,25 @@ async def sb_get_leagues() -> list:
     except Exception:
         pass
     return []
+
+
+async def sb_delete_league(league_id: int) -> bool:
+    """Tar bort en liga och dess cachade data. gw_cache rörs inte —
+    den är nycklad på entry_id och delas mellan ligor."""
+    ok = False
+    try:
+        async with httpx.AsyncClient(timeout=8) as c:
+            for table in ("managers_cache", "league_state", "leagues"):
+                r = await c.delete(
+                    f"{SUPABASE_URL}/rest/v1/{table}",
+                    headers=SB_HEADERS,
+                    params={"league_id": f"eq.{league_id}"},
+                )
+                if table == "leagues":
+                    ok = r.status_code in (200, 204)
+    except Exception:
+        pass
+    return ok
 
 
 # ── Supabase: league_state ──
@@ -349,22 +447,49 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
         managers = league_data["standings"]["results"]
         league_name = league_data.get("league", {}).get("name", f"Liga {league_id}")
 
+    # Ny säsong / nyligen anslutna: FPL har tom "standings" tills första GW är
+    # beräknad — deltagarna ligger i "new_entries" istället. Lägg till dem med
+    # nollställda poäng så dashboarden funkar direkt.
+    known = {m["entry"] for m in managers}
+    placeholder_entries = set()
+    for e in league_data.get("new_entries", {}).get("results", []):
+        if e["entry"] in known:
+            continue
+        placeholder_entries.add(e["entry"])
+        managers.append({
+            "entry": e["entry"],
+            "entry_name": e.get("entry_name", ""),
+            "player_name": f'{e.get("player_first_name", "")} {e.get("player_last_name", "")}'.strip(),
+            "rank": len(managers) + 1,
+            "last_rank": len(managers) + 1,
+            "rank_sort": len(managers) + 1,
+            "total": 0,
+            "event_total": 0,
+        })
+
     entry_ids = [m["entry"] for m in managers]
-    gw_history, synced_at_map, bench_history, hits_history = await sb_read_all(entry_ids)
+    gw_history, synced_at_map, bench_history, hits_history, final_map = await sb_read_all(entry_ids)
 
     now = datetime.now(timezone.utc)
-    needs_current: list[int] = []
-    needs_historical: dict[int, set[int]] = {}
+    # Omgångar där FPL bekräftat slutgiltiga poäng — allt annat är preliminärt
+    checked_gws = {e["id"] for e in boot.get("events", []) if e.get("data_checked")}
 
+    def ttl_for(gw: int) -> timedelta:
+        return LIVE_GW_TTL if (live and gw == current_gw) else CURRENT_GW_TTL
+
+    # needs[entry_id] = omgångar som behöver hämtas från FPL
+    needs: dict[int, set[int]] = {}
     for eid in entry_ids:
-        current_ts = synced_at_map.get(eid, {}).get(current_gw)
-        if current_ts is None or (now - current_ts) > CURRENT_GW_TTL:
-            needs_current.append(eid)
-        missing = gws_to_fetch - set(gw_history.get(eid, {}).keys())
-        if missing:
-            needs_historical[eid] = missing
+        cached = gw_history.get(eid, {})
+        for gw in gws_to_fetch:
+            if gw not in cached:
+                needs.setdefault(eid, set()).add(gw)          # saknas helt
+            elif not final_map.get(eid, {}).get(gw):
+                ts = synced_at_map.get(eid, {}).get(gw)
+                if ts is None or (now - ts) > ttl_for(gw):    # preliminär och gammal
+                    needs.setdefault(eid, set()).add(gw)
 
-    entries_to_fetch = set(needs_current) | set(needs_historical.keys())
+    entries_to_fetch = set(needs.keys())
 
     if entries_to_fetch:
         to_cache: dict[int, dict[int, int]] = {}
@@ -379,19 +504,13 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
                 new_data: dict[int, int] = {}
                 new_bench: dict[int, int] = {}
                 new_hits: dict[int, int] = {}
+                wanted = needs.get(entry_id, set())
                 for gw_row in data.get("current", []):
                     gw_num = gw_row["event"]
                     hit_cost = gw_row.get("event_transfers_cost") or 0
                     pts = gw_row["points"] - hit_cost
                     bench = gw_row.get("points_on_bench") or 0
-                    if gw_num == current_gw and entry_id in needs_current:
-                        gw_history[entry_id][current_gw] = pts
-                        bench_history[entry_id][current_gw] = bench
-                        hits_history[entry_id][current_gw] = hit_cost
-                        new_data[current_gw] = pts
-                        new_bench[current_gw] = bench
-                        new_hits[current_gw] = hit_cost
-                    elif gw_num in needs_historical.get(entry_id, set()):
+                    if gw_num in wanted:
                         gw_history[entry_id][gw_num] = pts
                         bench_history[entry_id][gw_num] = bench
                         hits_history[entry_id][gw_num] = hit_cost
@@ -407,7 +526,20 @@ async def dashboard(league_id: int, background_tasks: BackgroundTasks):
 
         await asyncio.gather(*[fetch_entry(eid) for eid in entries_to_fetch])
         for eid, data in to_cache.items():
-            background_tasks.add_task(sb_write, eid, data, bench_to_cache.get(eid), hits_to_cache.get(eid))
+            background_tasks.add_task(sb_write, eid, data, bench_to_cache.get(eid),
+                                      hits_to_cache.get(eid), checked_gws)
+
+    # Placeholder-managers saknar total från FPL — räkna ut den från historiken
+    # och sortera om tabellen så ställningen stämmer redan under GW1.
+    if placeholder_entries:
+        for m in managers:
+            if m["entry"] in placeholder_entries:
+                hist = gw_history.get(m["entry"], {})
+                m["total"] = sum(hist.values())
+                m["event_total"] = hist.get(current_gw, 0)
+        managers.sort(key=lambda m: -m["total"])
+        for i, m in enumerate(managers):
+            m["rank"] = i + 1
 
     background_tasks.add_task(sb_upsert_managers, managers, league_id)
     background_tasks.add_task(sb_update_league_state, league_id, current_gw, live, managers)
@@ -460,7 +592,8 @@ async def get_history(entry_id: int, background_tasks: BackgroundTasks):
         gw["event"]: gw["points"] - (gw.get("event_transfers_cost") or 0)
         for gw in data.get("current", []) if gw["event"] in historical_set
     }
-    background_tasks.add_task(sb_write, entry_id, to_cache)
+    checked_gws = {e["id"] for e in boot.get("events", []) if e.get("data_checked")}
+    background_tasks.add_task(sb_write, entry_id, to_cache, None, None, checked_gws)
     return data
 
 
@@ -590,6 +723,8 @@ async def sync_all():
     if not historical_set:
         return {"message": "No historical GWs to sync", "synced": 0}
 
+    checked_gws = {e["id"] for e in boot.get("events", []) if e.get("data_checked")}
+
     async with httpx.AsyncClient(timeout=15) as c:
         league_r = await c.get(
             f"{FPL_BASE}/leagues-classic/{LEAGUE_ID}/standings/", headers=FPL_HEADERS
@@ -611,7 +746,7 @@ async def sync_all():
                 gw["event"]: gw["points"] - (gw.get("event_transfers_cost") or 0)
                 for gw in data.get("current", []) if gw["event"] in historical_set
             }
-            await sb_write(entry_id, to_cache)
+            await sb_write(entry_id, to_cache, None, None, checked_gws)
             synced += 1
         except Exception:
             pass
@@ -943,12 +1078,21 @@ async def chat(body: dict, background_tasks: BackgroundTasks):
                 if r.status_code == 200:
                     data = r.json()
                     managers = data["standings"]["results"]
+                    known = {m["entry"] for m in managers}
+                    for e in data.get("new_entries", {}).get("results", []):
+                        if e["entry"] not in known:
+                            managers.append({
+                                "entry": e["entry"],
+                                "entry_name": e.get("entry_name", ""),
+                                "player_name": f'{e.get("player_first_name", "")} {e.get("player_last_name", "")}'.strip(),
+                                "total": 0,
+                            })
                     league_name = data.get("league", {}).get("name", league_name)
         except Exception:
             return {"error": "api_error", "message": "Kunde inte hämta ligadata. Försök igen. 🔧"}
 
     entry_ids = [m["entry"] for m in managers]
-    gw_history, _, bench_history, hits_history = await sb_read_all(entry_ids)
+    gw_history, _, bench_history, hits_history, _ = await sb_read_all(entry_ids)
 
     state = await sb_get_league_state(league_id)
     current_gw = state["current_gw"] if state else 1
@@ -1111,6 +1255,14 @@ async def get_logs(limit: int = 50, level: str = None):
 @app.get("/api/leagues")
 async def get_leagues():
     return await sb_get_leagues()
+
+
+@app.delete("/api/leagues/{league_id}")
+async def delete_league(league_id: int):
+    ok = await sb_delete_league(league_id)
+    if not ok:
+        raise HTTPException(status_code=502, detail="Kunde inte ta bort ligan")
+    return {"deleted": league_id}
 
 
 @app.get("/api/ping")
