@@ -22,42 +22,14 @@ header {
   position: sticky; top: 0; z-index: 100;
 }
 .logo { display:flex; align-items:center; gap:10px; }
+.header-actions { display:flex; gap:8px; align-items:center; }
 .logo-mark { width:30px; height:30px; border-radius:6px; background:linear-gradient(135deg,var(--g),var(--g2)); display:flex; align-items:center; justify-content:center; font-family:'Bebas Neue',sans-serif; font-size:1rem; color:#000; }
 .logo-text { font-family:'Bebas Neue',sans-serif; font-size:1.3rem; letter-spacing:3px; color:var(--g); }
 .logo-sub { font-size:0.6rem; color:var(--muted); letter-spacing:2px; text-transform:uppercase; }
 .gw-pill { background:rgba(0,255,135,0.08); border:1px solid rgba(0,255,135,0.2); color:var(--g); font-family:'Bebas Neue',sans-serif; font-size:0.8rem; letter-spacing:2px; padding:4px 12px; border-radius:20px; }
 
 .app { display:grid; grid-template-columns:1fr 340px; min-height:calc(100vh - 60px); }
-@media(max-width:800px){
-  .app { grid-template-columns:1fr; }
-  .sidebar {
-    position:fixed; top:0; bottom:0; left:0; right:0;
-    z-index:200;
-    display:flex; flex-direction:column;
-    transform:translateY(110%);
-    transition:transform 0.35s cubic-bezier(0.4,0,0.2,1);
-    border-top:none;
-    background:var(--dark);
-    visibility:hidden;
-    overscroll-behavior:none;
-  }
-  .sidebar.open {
-    transform:translateY(0);
-    visibility:visible;
-  }
-  .chat-fab { display:flex !important; }
-  .chat-close-btn { display:flex !important; }
-  body.chat-open { overflow:hidden; }
-  /* Table responsiveness */
-  .table-card { overflow-x:auto; }
-  th, td { padding:8px 10px; font-size:0.75rem; }
-  .tn { display:none; }
-  /* Bar chart on small screens */
-  .bar-name { width:80px; }
-  .bar-total { display:none; }
-  /* Reduce main padding */
-  .main { padding:16px 12px; }
-}
+
 
 .main { padding:24px 20px; overflow-y:auto; overflow-x:hidden; border-right:1px solid var(--border); }
 
@@ -110,10 +82,14 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .tp { font-family:'Bebas Neue',sans-serif; font-size:1.1rem; color:var(--g); letter-spacing:1px; }
 
 .gw-section { background:var(--card); border:1px solid var(--border); border-radius:10px; overflow:hidden; margin-bottom:24px; }
-.gw-head { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+.gw-head { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; }
+.gw-head .bar-toggle { margin-left:auto; }
 .gw-bars { padding:16px; display:flex; flex-direction:column; gap:6px; }
 .bar-row { display:flex; align-items:center; gap:8px; }
-.bar-name { font-size:0.68rem; width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0; }
+.bar-head-row { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.bar-tail { display:flex; gap:6px; flex-shrink:0; width:58px; justify-content:flex-end; font-family:'IBM Plex Mono',monospace; }
+.bar-name, .bar-name-spacer { width:110px; flex-shrink:0; }
+.bar-name { font-size:0.68rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .bar-track { flex:1; background:var(--border); border-radius:2px; height:16px; overflow:hidden; }
 .bar-fill { height:100%; background:linear-gradient(90deg,var(--g),var(--g2)); border-radius:2px; transition:width 0.5s cubic-bezier(0.4,0,0.2,1); }
 .bar-fill.top { background:linear-gradient(90deg,var(--gold),#ffaa00); }
@@ -228,8 +204,12 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .setup-divider::before, .setup-divider::after { content:''; flex:1; height:1px; background:var(--border); }
 .setup-divider span { font-size:0.6rem; color:var(--muted); font-family:'IBM Plex Mono',monospace; letter-spacing:1px; }
 .known-leagues { display:flex; flex-direction:column; gap:6px; margin-bottom:4px; }
-.known-league-btn { background:var(--card2); border:1px solid var(--border2); color:var(--text); border-radius:8px; padding:11px 14px; text-align:left; cursor:pointer; font-size:0.85rem; font-weight:500; transition:border-color 0.15s; }
+.known-league-row { display:flex; gap:6px; align-items:stretch; }
+.known-league-btn { flex:1; min-width:0; background:var(--card2); border:1px solid var(--border2); color:var(--text); border-radius:8px; padding:11px 14px; text-align:left; cursor:pointer; font-size:0.85rem; font-weight:500; transition:border-color 0.15s; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .known-league-btn:hover { border-color:rgba(0,255,135,0.3); color:var(--g); }
+.known-league-del { flex-shrink:0; width:38px; background:var(--card2); border:1px solid var(--border2); color:var(--muted); border-radius:8px; cursor:pointer; font-size:0.95rem; line-height:1; transition:border-color 0.15s,color 0.15s; }
+.known-league-del:hover { border-color:var(--red); color:var(--red); }
+.known-league-del:disabled { opacity:0.4; cursor:default; }
 .change-league { font-size:0.6rem; color:var(--muted); letter-spacing:1px; cursor:pointer; font-family:'IBM Plex Mono',monospace; text-decoration:underline; }
 .change-league:hover { color:var(--muted2); }
 
@@ -268,7 +248,100 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .team-change.zero { color:var(--muted); }
 .team-loading { text-align:center; padding:60px 20px; color:var(--muted2); font-size:0.85rem; }
 .mn-link { cursor:pointer; text-decoration:none; color:inherit; }
+
+/* Mobilflikar — dolda på desktop, där båda vyerna visas under varandra */
+.mtabs { display:none; }
+.mtab { flex:1; background:var(--card2); border:1px solid var(--border2); color:var(--muted2);
+        font-family:'IBM Plex Mono',monospace; font-size:0.7rem; letter-spacing:2px; text-transform:uppercase;
+        padding:9px 6px; cursor:pointer; }
+.mtab:first-child { border-radius:8px 0 0 8px; }
+.mtab:last-child { border-radius:0 8px 8px 0; border-left:none; }
+.mtab.active { background:var(--g); border-color:var(--g); color:#000; font-weight:600; }
+.tp-gw { display:none; }
 .mn-link:hover { color:var(--g); }
+
+/* ── Mobil: måste ligga sist, annars överskrivs reglerna av basreglerna ── */
+@media(max-width:800px){
+  .app { grid-template-columns:1fr; }
+  .sidebar {
+    position:fixed; top:0; bottom:0; left:0; right:0;
+    z-index:200;
+    display:flex; flex-direction:column;
+    transform:translateY(110%);
+    transition:transform 0.35s cubic-bezier(0.4,0,0.2,1);
+    border-top:none;
+    background:var(--dark);
+    visibility:hidden;
+    overscroll-behavior:none;
+  }
+  .sidebar.open {
+    transform:translateY(0);
+    visibility:visible;
+  }
+  .chat-fab { display:flex !important; }
+  .chat-close-btn { display:flex !important; }
+  body.chat-open { overflow:hidden; }
+  /* Table responsiveness */
+  .table-card { overflow-x:auto; }
+  th, td { padding:8px 10px; font-size:0.75rem; }
+  /* Bar chart on small screens */
+  .bar-name, .bar-name-spacer { width:110px; }
+  .bar-total { display:none; }
+  /* Reduce main padding — extra i botten så chattknappen inte täcker sista raden */
+  .main { padding:16px 12px 88px; }
+
+  /* Header: låt logotypen krympa i stället för att krocka med knapparna */
+  header { padding:0 12px; gap:8px; }
+  .logo { min-width:0; flex:1; }
+  .logo-mark { flex-shrink:0; }
+  .logo > div { min-width:0; }
+  .logo-text { font-size:1.05rem; letter-spacing:1.5px; }
+  .logo-text, .logo-sub { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .header-actions { flex-shrink:0; }
+  .change-league, .live-badge, .gw-pill { white-space:nowrap; }
+
+  /* Jämförelse: titel + tagg på rad 1, alla fem lägen på full bredd på rad 2 */
+  .gw-head { flex-wrap:wrap; padding:12px; row-gap:10px; }
+  .gw-head .table-title { order:1; }
+  .gw-head #gw-selected-label { order:2; margin-left:auto; }
+  .gw-head .bar-toggle { order:3; flex-basis:100%; margin-left:0;
+                         overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+  .gw-head .bar-toggle::-webkit-scrollbar { display:none; }
+  /* grow men aldrig shrink: fyller bredden på vanliga telefoner, scrollar
+     i stället för att klippa texten på riktigt smala skärmar */
+  .bar-toggle-btn { flex:1 0 auto; white-space:nowrap; padding:6px 4px; text-align:center; }
+
+  /* Flikar i stället för en fyra sektioner lång scroll */
+  .mtabs { display:flex; margin-bottom:16px; }
+  .hidden-view { display:none; }
+
+  /* Pallen upprepar tabellens tre översta rader — medaljerna räcker på mobil */
+  .podium { display:none; }
+  .sec-podium { display:none; }
+  td:first-child { white-space:nowrap; padding-right:4px; }
+  tr.r1 .rn::after { content:' 🥇'; font-size:0.78em; }
+  tr.r2 .rn::after { content:' 🥈'; font-size:0.78em; }
+  tr.r3 .rn::after { content:' 🥉'; font-size:0.78em; }
+
+  /* Fyra kolumner blir tre: GW-poängen flyttar in under totalen,
+     vilket frigör bredd så att lagnamnet får plats igen */
+  .col-gw { display:none; }
+  .tp-gw { display:block; font-size:0.62rem; color:var(--muted); font-weight:400;
+           font-family:'IBM Plex Mono',monospace; margin-top:1px; }
+  .tn { display:block; }
+
+  /* Lägesväljaren följer med när man scrollar i diagrammet */
+  .gw-head { position:sticky; top:0; z-index:5; background:var(--card); }
+}
+
+/* Riktigt smala skärmar: korta ned "Byt liga" så appnamnet inte kapas */
+@media(max-width:380px){
+  .change-league { font-size:0; }
+  .change-league::after { content:'Byt'; font-size:0.6rem; letter-spacing:1px; }
+}
+@media(max-width:340px){
+  .logo-text { font-size:0.9rem; letter-spacing:1px; }
+}
 </style>
 </head>
 <body>
@@ -298,7 +371,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
       <div class="logo-sub" id="league-name-sub">Liga · Live Data</div>
     </div>
   </div>
-  <div style="display:flex;gap:8px;align-items:center;">
+  <div class="header-actions">
     <span class="change-league" onclick="changeLeague()">Byt liga</span>
     <div class="live-badge hidden" id="live-badge">● LIVE</div>
     <div class="gw-pill hidden" id="gw-pill">GW —</div>
@@ -314,6 +387,11 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
     </div>
     <div class="error" id="error-box"></div>
     <div id="dashboard" class="hidden">
+      <div class="mtabs">
+        <button class="mtab active" id="mtab-table" onclick="setMobileView('table')">Tabell</button>
+        <button class="mtab" id="mtab-compare" onclick="setMobileView('compare')">Jämförelse</button>
+      </div>
+      <div class="view" id="view-table">
       <div class="sec">Översikt</div>
       <div class="stats-grid">
         <div class="stat"><div class="stat-label">Deltagare</div><div class="stat-val" id="s-managers">—</div><div class="stat-hint">i ligan</div></div>
@@ -321,30 +399,31 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
         <div class="stat"><div class="stat-label">Ledare</div><div class="stat-val" id="s-leader-pts" style="font-size:1.4rem">—</div><div class="stat-hint" id="s-leader-name">—</div></div>
         <div class="stat"><div class="stat-label">Bäst denna GW</div><div class="stat-val" id="s-top-gw">—</div><div class="stat-hint" id="s-top-gw-name">—</div></div>
       </div>
-<div class="sec">Topp 3</div>
+<div class="sec sec-podium">Topp 3</div>
       <div class="podium" id="podium"></div>
       <div class="sec">Ligatabell</div>
       <div class="table-card">
         <div class="table-head"><div class="table-title">Ställning</div><div class="table-tag" id="table-gw-tag">GW —</div></div>
-        <table><thead><tr><th>#</th><th>Manager</th><th>Totalt</th><th>GW</th></tr></thead><tbody id="standings-body"></tbody></table>
+        <table><thead><tr><th>#</th><th>Manager</th><th>Totalt</th><th class="col-gw">GW</th></tr></thead><tbody id="standings-body"></tbody></table>
       </div>
+      </div>
+      <div class="view hidden-view" id="view-compare">
       <div class="sec">Statistik & Jämförelse</div>
       <div class="gw-section">
         <div class="gw-head">
           <div class="table-title">Jämförelse</div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <div class="bar-toggle">
-              <button class="bar-toggle-btn active" id="toggle-gw" onclick="setBarMode('gw')">GW</button>
-              <button class="bar-toggle-btn" id="toggle-total" onclick="setBarMode('total')">TOTAL</button>
-              <button class="bar-toggle-btn" id="toggle-quarter" onclick="setBarMode('quarter')">KVARTAL</button>
-              <button class="bar-toggle-btn" id="toggle-bench" onclick="setBarMode('bench')">BÄNK</button>
-              <button class="bar-toggle-btn" id="toggle-hits" onclick="setBarMode('hits')">MINUS</button>
-            </div>
-            <div class="table-tag" id="gw-selected-label">GW —</div>
+          <div class="bar-toggle">
+            <button class="bar-toggle-btn active" id="toggle-gw" onclick="setBarMode('gw')">GW</button>
+            <button class="bar-toggle-btn" id="toggle-total" onclick="setBarMode('total')">TOTAL</button>
+            <button class="bar-toggle-btn" id="toggle-quarter" onclick="setBarMode('quarter')">KVARTAL</button>
+            <button class="bar-toggle-btn" id="toggle-bench" onclick="setBarMode('bench')">BÄNK</button>
+            <button class="bar-toggle-btn" id="toggle-hits" onclick="setBarMode('hits')">MINUS</button>
           </div>
+          <div class="table-tag" id="gw-selected-label">GW —</div>
         </div>
         <div class="gw-bars" id="gw-bars"></div>
         <div class="gw-nav" id="gw-nav"></div>
+      </div>
       </div>
 
     </div>
@@ -446,17 +525,58 @@ async function showSetup() {
   document.getElementById('setup-error').textContent = '';
   document.getElementById('league-input').value = '';
   try {
-    const leagues = await get('/api/leagues');
-    if (leagues && leagues.length > 0) {
-      document.getElementById('known-leagues-section').classList.remove('hidden');
-      document.getElementById('setup-desc-text').textContent = 'Eller ange ett nytt liga-ID:';
-      document.getElementById('known-leagues-list').innerHTML = leagues.map(l =>
-        `<button class="known-league-btn" onclick="pickLeague(${l.league_id}, '${l.league_name.replace(/'/g,"\\'")}')">
-          ${l.league_name}
-        </button>`
-      ).join('');
-    }
+    renderKnownLeagues(await get('/api/leagues'));
   } catch(e) { /* tyst — visa bara input */ }
+}
+
+function renderKnownLeagues(leagues) {
+  const section = document.getElementById('known-leagues-section');
+  if (!leagues || leagues.length === 0) {
+    section.classList.add('hidden');
+    document.getElementById('known-leagues-list').innerHTML = '';
+    document.getElementById('setup-desc-text').textContent =
+      'Ange din ligas ID-kod för att komma igång.';
+    return;
+  }
+  section.classList.remove('hidden');
+  document.getElementById('setup-desc-text').textContent = 'Eller ange ett nytt liga-ID:';
+  document.getElementById('known-leagues-list').innerHTML = leagues.map(l => {
+    const name = esc(l.league_name), safe = jsStr(l.league_name);
+    return `<div class="known-league-row">
+      <button class="known-league-btn" title="${name}" onclick="pickLeague(${l.league_id}, '${safe}')">${name}</button>
+      <button class="known-league-del" title="Ta bort ${name}" onclick="deleteLeague(event, ${l.league_id}, '${safe}')">&times;</button>
+    </div>`;
+  }).join('');
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function jsStr(s) {
+  return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+async function deleteLeague(ev, id, name) {
+  ev.stopPropagation();
+  if (!confirm(`Ta bort "${name}" från listan?\n\nLigan tas bort från sparade ligor. Du kan alltid lägga till den igen med liga-ID ${id}.`)) return;
+  const btn = ev.currentTarget;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/leagues/${id}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (String(localStorage.getItem('fpl_league_id')) === String(id)) {
+      localStorage.removeItem('fpl_league_id');
+      localStorage.removeItem('fpl_league_name');
+      LEAGUE_ID = null;
+      LEAGUE_NAME = '';
+    }
+    renderKnownLeagues(await get('/api/leagues'));
+  } catch(e) {
+    btn.disabled = false;
+    document.getElementById('setup-error').textContent = `Kunde inte ta bort ligan (${e.message})`;
+  }
 }
 
 function pickLeague(id, name) {
@@ -561,6 +681,17 @@ function showToast(msg) {
 function render() {
   document.getElementById('s-managers').textContent = managers.length;
   document.getElementById('s-gw').textContent = currentGW;
+  if (!managers.length) {
+    document.getElementById('s-leader-pts').textContent = '—';
+    document.getElementById('s-leader-name').textContent = 'Inga deltagare än';
+    document.getElementById('s-top-gw').textContent = '—';
+    document.getElementById('s-top-gw-name').textContent = '—';
+    document.getElementById('podium').innerHTML = '';
+    document.getElementById('standings-body').innerHTML =
+      '<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--muted2)">Ligan har inga deltagare med poäng än — kom tillbaka när GW 1 är beräknad.</td></tr>';
+    document.getElementById('gw-nav').innerHTML = '';
+    return;
+  }
   const leader = managers[0];
   document.getElementById('s-leader-pts').textContent = leader.total.toLocaleString('sv-SE');
   document.getElementById('s-leader-name').textContent = leader.player_name;
@@ -580,7 +711,7 @@ function render() {
   // standings
   document.getElementById('standings-body').innerHTML = managers.map((m,i)=>{
     const gp=gwHistory[m.entry]?.[currentGW]??'—', rc=i===0?'r1':i===1?'r2':i===2?'r3':'';
-    return `<tr class="${rc}"><td><span class="rn">${i+1}</span></td><td><span class="mn mn-link" onclick="openTeamView(${m.entry},'${m.player_name.replace(/'/g,"\\'")}','${m.entry_name.replace(/'/g,"\\'")}')">${m.player_name}</span><span class="tn">${m.entry_name}</span></td><td><span class="tp">${m.total.toLocaleString('sv-SE')}</span></td><td>${gp}</td></tr>`;
+    return `<tr class="${rc}"><td><span class="rn">${i+1}</span></td><td><span class="mn mn-link" onclick="openTeamView(${m.entry},'${m.player_name.replace(/'/g,"\\'")}','${m.entry_name.replace(/'/g,"\\'")}')">${m.player_name}</span><span class="tn">${m.entry_name}</span></td><td><span class="tp">${m.total.toLocaleString('sv-SE')}</span><span class="tp-gw">${gp} denna gw</span></td><td class="col-gw">${gp}</td></tr>`;
   }).join('');
 
   // gw nav
@@ -591,6 +722,14 @@ function render() {
 }
 
 let barMode = 'gw', benchSort = 'gw', hitSort = 'gw';
+
+function setMobileView(view) {
+  document.getElementById('view-table').classList.toggle('hidden-view', view !== 'table');
+  document.getElementById('view-compare').classList.toggle('hidden-view', view !== 'compare');
+  document.getElementById('mtab-table').classList.toggle('active', view === 'table');
+  document.getElementById('mtab-compare').classList.toggle('active', view === 'compare');
+  window.scrollTo(0, 0);
+}
 
 function setBarMode(mode) {
   barMode = mode;
@@ -668,11 +807,11 @@ function renderBars(gw) {
 
     document.getElementById('gw-selected-label').textContent = `BÄNK ${gwLabel}`;
     document.getElementById('gw-bars').innerHTML =
-      `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;padding:0 2px;">
-        <div style="width:110px;flex-shrink:0"></div>
+      `<div class="bar-head-row">
+        <div class="bar-name-spacer"></div>
         <div style="flex:1"></div>
         <div style="${hStyle(gwActive)}width:32px;text-align:right;" onclick="setBenchSort('gw')">${gwActive?'↓ ':''}<span>GW</span></div>
-        <div style="display:flex;gap:6px;flex-shrink:0;">
+        <div class="bar-tail">
           ${q?`<span style="${hStyle(qActive)}" onclick="setBenchSort('quarter')">${qActive?'↓ ':''}${qLabel}</span>`:''}
           <span style="${hStyle(totActive)}" onclick="setBenchSort('total')">${totActive?'↓ ':''}Tot</span>
         </div>
@@ -682,7 +821,7 @@ function renderBars(gw) {
         <div class="bar-name" title="${s.name}">${s.name}</div>
         <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s[sortKey]/max*100).toFixed(1)}%"></div></div>
         <div class="bar-pts" style="color:${gwActive?'var(--text)':'var(--muted2)'}">${s.gw_bench}</div>
-        <div style="display:flex;gap:6px;flex-shrink:0;font-family:'IBM Plex Mono',monospace;">
+        <div class="bar-tail">
           ${q?`<span style="font-size:0.75rem;color:${qActive?'var(--g)':'var(--muted2)'};font-weight:${qActive?'600':'400'}">${s.q_bench}</span>`:''}
           <span style="font-size:0.72rem;color:${totActive?'var(--g)':'var(--muted2)'};font-weight:${totActive?'600':'400'}">${s.total_bench}</span>
         </div>
@@ -713,10 +852,11 @@ function renderBars(gw) {
 
     document.getElementById('gw-selected-label').textContent = `MINUS ${gwLabel}`;
     document.getElementById('gw-bars').innerHTML =
-      `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;padding:0 2px;">
+      `<div class="bar-head-row">
+        <div class="bar-name-spacer"></div>
         <div style="flex:1"></div>
-        <div style="display:flex;gap:10px;align-items:center;">
-          <span style="${hStyle(gwActive)}" onclick="setHitSort('gw')">${gwActive?'↓ ':''}${gwLabel}</span>
+        <div style="${hStyle(gwActive)}width:32px;text-align:right;" onclick="setHitSort('gw')">${gwActive?'↓ ':''}<span>GW</span></div>
+        <div class="bar-tail">
           ${q?`<span style="${hStyle(qActive)}" onclick="setHitSort('quarter')">${qActive?'↓ ':''}${qLabel}</span>`:''}
           <span style="${hStyle(totActive)}" onclick="setHitSort('total')">${totActive?'↓ ':''}Tot</span>
         </div>
@@ -726,7 +866,7 @@ function renderBars(gw) {
         <div class="bar-name" title="${s.name}">${s.name}</div>
         <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s[sortKey]/max*100).toFixed(1)}%;background:var(--red)"></div></div>
         <div class="bar-pts" style="color:${gwActive?'var(--red)':'var(--muted2)'}">${s.gw_hits}</div>
-        <div style="display:flex;gap:6px;flex-shrink:0;font-family:'IBM Plex Mono',monospace;">
+        <div class="bar-tail">
           ${q?`<span style="font-size:0.75rem;color:${qActive?'var(--red)':'var(--muted2)'};font-weight:${qActive?'600':'400'}">${s.q_hits}</span>`:''}
           <span style="font-size:0.72rem;color:${totActive?'var(--red)':'var(--muted2)'};font-weight:${totActive?'600':'400'}">${s.total_hits}</span>
         </div>
