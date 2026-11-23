@@ -778,7 +778,6 @@ function renderBars(gw) {
       const data = managers.map(m => ({
         name: m.player_name,
         q_pts: qRange.reduce((s, g) => s + (gwHistory[m.entry]?.[g] || 0), 0),
-        q_hits: qRange.reduce((s, g) => s + (hitsHistory[m.entry]?.[g] || 0), 0),
         gw_pts: gwHistory[m.entry]?.[gw] || 0,
       })).sort((a, b) => b.q_pts - a.q_pts);
       const max = Math.max(...data.map(d => d.q_pts), 1);
@@ -787,7 +786,6 @@ function renderBars(gw) {
         <div class="bar-row"><div class="bar-name" title="${s.name}">${s.name}</div>
         <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s.q_pts/max*100).toFixed(1)}%"></div></div>
         <div class="bar-pts">${s.q_pts}</div>
-        <div class="bar-hit">${hitLabel(s.q_hits)}</div>
         <div class="bar-total">${s.gw_pts} gw</div></div>`).join('');
     }
     return;
