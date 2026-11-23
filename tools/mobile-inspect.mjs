@@ -25,7 +25,7 @@ await p.evaluate((mode) => {
   document.getElementById('gw-pill').classList.remove('hidden');
   document.getElementById('gw-pill').textContent='GW 12';
   document.getElementById('live-badge').classList.remove('hidden');
-  render(); setMobileView('compare'); if (mode!=='gw') setBarMode(mode);
+  render(); if (mode!=='gw') setBarMode(mode);
 }, mode);
 // mät rubrikradens kolumner mot första datradens
 const align = await p.evaluate(() => {

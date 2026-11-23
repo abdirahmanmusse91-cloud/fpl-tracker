@@ -29,7 +29,7 @@ function makeData() {
   return { managers, gwHistory, benchHistory, hitsHistory };
 }
 
-const [,, port, outDir, label, mode, view] = process.argv;
+const [,, port, outDir, label, mode] = process.argv;
 const browser = await chromium.launch();
 const VIEWPORTS = [['iphone15', 390, 844], ['android', 360, 800], ['smal', 320, 568]];
 const report = [];
@@ -37,7 +37,7 @@ const report = [];
 for (const [vpName, width, height] of VIEWPORTS) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2 });
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
-  await page.evaluate(({ data, gw, mode, view }) => {
+  await page.evaluate(({ data, gw, mode }) => {
     managers = data.managers; gwHistory = data.gwHistory;
     benchHistory = data.benchHistory; hitsHistory = data.hitsHistory;
     currentGW = gw; selectedGW = gw; dataLoaded = true;
@@ -50,8 +50,7 @@ for (const [vpName, width, height] of VIEWPORTS) {
     document.getElementById('league-name-sub').textContent = 'Big Blinds 26/27';
     render();
     if (mode && mode !== 'gw') setBarMode(mode);
-    if (view) setMobileView(view);
-  }, { data: makeData(), gw: CURRENT_GW, mode, view });
+  }, { data: makeData(), gw: CURRENT_GW, mode });
 
   // mät överflöd: vilka element är bredare än sin egen box?
   const overflow = await page.evaluate(() => {

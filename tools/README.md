@@ -27,7 +27,7 @@ bredare än sin box — alltså allt som klipps eller spiller över.
 
 ```bash
 python3 -m uvicorn main:app --port 8940 &
-./run.sh mobile-shots.mjs 8940 ./shots efter gw table
+./run.sh mobile-shots.mjs 8940 ./shots efter gw
 #                         port  utkatalog  namn  läge  vy
 ```
 

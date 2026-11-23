@@ -12,7 +12,7 @@
 2. Klicka "New" → "Web Service"
 3. Koppla ditt GitHub-konto och välj `fpl-tracker`
 4. Render hittar render.yaml automatiskt
-5. Lägg till miljövariabel: `ANTHROPIC_API_KEY` = din API-nyckel
+5. Lägg till miljövariabel: `SUPABASE_KEY` = Supabase-nyckeln
 6. Klicka "Deploy"
 
 ### Steg 3 – Klar!
@@ -21,7 +21,7 @@ Du får en länk typ `fpl-tracker.onrender.com` — öppna den på mobilen 🟢
 ## Lokal körning (för test)
 ```bash
 pip install -r requirements.txt
-export ANTHROPIC_API_KEY=din-nyckel
+export SUPABASE_URL=https://gduuhbvkyjcesahmooon.supabase.co SUPABASE_KEY=din-nyckel
 uvicorn main:app --reload
 ```
 Öppna http://localhost:8000
