@@ -259,6 +259,7 @@ td:not(:first-child):not(:nth-child(2)) { text-align:right; }
 .mtab:last-child { border-radius:0 8px 8px 0; border-left:none; }
 .mtab.active { background:var(--g); border-color:var(--g); color:#000; font-weight:600; }
 .tp-gw { display:none; }
+.gw-hit { color:var(--red); font-size:0.75em; font-family:'IBM Plex Mono',monospace; }
 .mn-link:hover { color:var(--g); }
 
 /* ── Mobil: måste ligga sist, annars överskrivs reglerna av basreglerna ── */
@@ -713,7 +714,10 @@ function render() {
 
   // standings
   document.getElementById('standings-body').innerHTML = managers.map((m,i)=>{
-    const gp=gwHistory[m.entry]?.[currentGW]??'—', rc=i===0?'r1':i===1?'r2':i===2?'r3':'';
+    // Omgångspoäng som i FPL (före avdrag), minuset bredvid
+    const net=gwHistory[m.entry]?.[currentGW], hit=hitsHistory[m.entry]?.[currentGW]||0;
+    const hitSpan=hit?` <span class="gw-hit">−${hit}</span>`:'';
+    const gp=net==null?'—':`${net+hit}${hitSpan}`, rc=i===0?'r1':i===1?'r2':i===2?'r3':'';
     return `<tr class="${rc}"><td><span class="rn">${i+1}</span></td><td><span class="mn mn-link" onclick="openTeamView(${m.entry},'${m.player_name.replace(/'/g,"\\'")}','${m.entry_name.replace(/'/g,"\\'")}')">${m.player_name}</span><span class="tn">${m.entry_name}</span></td><td><span class="tp">${m.total.toLocaleString('sv-SE')}</span><span class="tp-gw">${gp} denna gw</span></td><td class="col-gw">${gp}</td></tr>`;
   }).join('');
 
