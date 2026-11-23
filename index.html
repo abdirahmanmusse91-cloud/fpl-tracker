@@ -779,6 +779,7 @@ function renderBars(gw) {
         name: m.player_name,
         q_pts: qRange.reduce((s, g) => s + (gwHistory[m.entry]?.[g] || 0), 0),
         gw_pts: gwHistory[m.entry]?.[gw] || 0,
+        gw_hits: hitsHistory[m.entry]?.[gw] || 0,
       })).sort((a, b) => b.q_pts - a.q_pts);
       const max = Math.max(...data.map(d => d.q_pts), 1);
       document.getElementById('gw-selected-label').textContent = `K${q.num} GW${q.from}–${gw}`;
@@ -786,7 +787,7 @@ function renderBars(gw) {
         <div class="bar-row"><div class="bar-name" title="${s.name}">${s.name}</div>
         <div class="bar-track"><div class="bar-fill ${i===0?'top':''}" style="width:${(s.q_pts/max*100).toFixed(1)}%"></div></div>
         <div class="bar-pts">${s.q_pts}</div>
-        <div class="bar-total">${s.gw_pts} gw</div></div>`).join('');
+        <div class="bar-total">${gwSub(s)}</div></div>`).join('');
     }
     return;
   }
@@ -895,7 +896,7 @@ function renderBars(gw) {
   // omgångspoäng (före avdrag) med minuset bredvid, som i FPL.
   const mainVal = s => barMode === 'total' ? s.total : s.gw_pts;
   const shownVal = s => barMode === 'total' ? s.total : s.gw_pts + s.gw_hits;
-  const subVal  = s => barMode === 'total' ? `${s.gw_pts} gw` : `${s.total} tot`;
+  const subVal  = s => barMode === 'total' ? gwSub(s) : `${s.total} tot`;
   const max = Math.max(...sorted.map(s => mainVal(s)), 1);
   document.getElementById('gw-bars').innerHTML = sorted.map((s, i) => `
     <div class="bar-row"><div class="bar-name" title="${s.name}">${s.name}</div>
@@ -906,6 +907,8 @@ function renderBars(gw) {
 }
 
 function hitLabel(h) { return h ? `−${h}` : ''; }
+// Omgångspoäng som i FPL (före avdrag) med minuset i rött, för den grå kolumnen
+function gwSub(s) { return `${s.gw_pts + s.gw_hits}${s.gw_hits ? ` <span class="gw-hit">−${s.gw_hits}</span>` : ''} gw`; }
 
 // ── CHAT ──
 let chatHistory = [];
